@@ -1,0 +1,10 @@
+# screenshot.ps1 PowerShell 5.1 читает байт-в-байт: BOM и переводы строк важны,
+# иначе скрипт декодируется иначе, чем в dev-режиме. Git не должен их трогать.
+*.ps1 -text
+
+# Бинарные файлы не нормализуем
+*.png binary
+*.jpg binary
+*.ico binary
+*.exe binary
+*.zip binary

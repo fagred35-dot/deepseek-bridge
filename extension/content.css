@@ -1,0 +1,236 @@
+#dsbridge-panel {
+  position: fixed;
+  right: 16px;
+  bottom: 16px;
+  width: 320px;
+  z-index: 2147483646;
+  background: #1e1e2e;
+  color: #cdd6f4;
+  border: 1px solid #313244;
+  border-radius: 12px;
+  font: 13px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  overflow: hidden;
+}
+#dsbridge-panel .dsb-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: #181825;
+  border-bottom: 1px solid #313244;
+}
+#dsbridge-panel .dsb-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #6c7086;
+  flex: none;
+}
+#dsbridge-panel .dsb-dot.on { background: #a6e3a1; }
+#dsbridge-panel .dsb-dot.off { background: #f38ba8; }
+#dsbridge-panel .dsb-title { font-weight: 500; }
+#dsbridge-panel .dsb-status {
+  flex: 1;
+  color: #6c7086;
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#dsbridge-panel .dsb-x {
+  background: transparent;
+  border: 0;
+  color: #a6adc8;
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+}
+#dsbridge-panel .dsb-body { padding: 10px 12px; }
+#dsbridge-panel.dsb-collapsed .dsb-body { display: none; }
+#dsbridge-panel .dsb-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #a6adc8;
+  margin-bottom: 8px;
+}
+#dsbridge-panel .dsb-lbl { flex: 1; }
+#dsbridge-panel .dsb-unit { color: #6c7086; font-size: 11px; }
+#dsbridge-panel .dsb-row input[type="number"] {
+  width: 52px;
+  background: #181825;
+  color: #cdd6f4;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 3px 6px;
+  font: inherit;
+  font-size: 12px;
+  text-align: center;
+}
+#dsbridge-panel .dsb-row input[type="number"]:focus { outline: 1px solid #89b4fa; }
+/* Строка состояния шлюза отправки: видно, почему сообщение ещё не ушло */
+#dsbridge-panel .dsb-gate {
+  color: #f9e2af;
+  font-size: 11px;
+  min-height: 0;
+  margin: -2px 0 8px;
+}
+#dsbridge-panel .dsb-gate:empty { display: none; }
+#dsbridge-panel .dsb-btn {
+  width: 100%;
+  background: #89b4fa;
+  color: #11111b;
+  border: 0;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+}
+#dsbridge-panel .dsb-btn:hover { filter: brightness(1.08); }
+#dsbridge-panel .dsb-btns { display: flex; gap: 8px; }
+#dsbridge-panel .dsb-btns .dsb-btn { flex: 1; }
+#dsbridge-panel .dsb-diag { margin-top: 8px; color: #6c7086; font-size: 11px; }
+#dsbridge-panel .dsb-log {
+  margin-top: 10px;
+  max-height: 150px;
+  overflow: auto;
+  background: #181825;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  padding: 6px 8px;
+  font-family: Consolas, monospace;
+  font-size: 11px;
+}
+#dsbridge-panel .dsb-ev { padding: 1px 0; color: #a6adc8; }
+#dsbridge-panel .dsb-ok { color: #a6e3a1; }
+#dsbridge-panel .dsb-error { color: #f38ba8; }
+
+.dsb-result {
+  margin: 8px 0;
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-left: 3px solid #89b4fa;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: 12px/1.5 Consolas, monospace;
+  color: #cdd6f4;
+}
+.dsb-result .dsb-res-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.dsb-result .dsb-res-tool { color: #89b4fa; font-weight: 500; }
+.dsb-result .dsb-res-state { color: #6c7086; font-size: 11px; }
+.dsb-result .dsb-res-state.ok { color: #a6e3a1; }
+.dsb-result .dsb-res-state.err { color: #f38ba8; }
+.dsb-result .dsb-res-hint { color: #f9e2af; font-size: 11px; margin-bottom: 8px; }
+.dsb-result .dsb-res-body {
+  margin: 0 0 8px;
+  max-height: 220px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #a6adc8;
+}
+.dsb-result .dsb-btn {
+  width: auto;
+  background: #89b4fa;
+  color: #11111b;
+  border: 0;
+  border-radius: 6px;
+  padding: 5px 10px;
+  font-size: 11px;
+  font-weight: 500;
+  cursor: pointer;
+}
+.dsb-result .dsb-mini {
+  margin-left: auto;
+  background: transparent;
+  color: #6c7086;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 2px 7px;
+  font-size: 10px;
+  cursor: pointer;
+}
+.dsb-result .dsb-mini:hover { color: #cdd6f4; border-color: #45475a; }
+.dsb-result .dsb-res-collapse:empty { display: none; }
+
+/* Картинка из ответа (локальный файл или ссылка из интернета) */
+.dsb-image-card {
+  margin: 8px 0;
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-radius: 8px;
+  padding: 8px;
+  font: 12px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #cdd6f4;
+}
+.dsb-image-card .dsb-image {
+  display: block;
+  max-width: 100%;
+  max-height: 420px;
+  border-radius: 6px;
+  background: #181825;
+}
+.dsb-image-card .dsb-img-loading { color: #6c7086; font-size: 11px; padding: 6px 0; }
+.dsb-image-card .dsb-img-caption {
+  margin-top: 6px;
+  color: #6c7086;
+  font-size: 11px;
+  word-break: break-all;
+}
+.dsb-image-card .dsb-img-open {
+  display: inline-block;
+  margin-top: 6px;
+  color: #89b4fa;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+/* Ссылка на файл в рабочей папке */
+.dsb-file-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  background: #1e1e2e;
+  border: 1px solid #313244;
+  border-left: 3px solid #a6e3a1;
+  border-radius: 8px;
+  padding: 8px 10px;
+  font: 12px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #cdd6f4;
+}
+.dsb-file-card .dsb-file-link {
+  color: #89b4fa;
+  text-decoration: none;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dsb-file-card .dsb-file-link:hover { text-decoration: underline; }
+.dsb-file-card .dsb-file-dl {
+  color: #a6adc8;
+  text-decoration: none;
+  font-size: 11px;
+  border: 1px solid #313244;
+  border-radius: 6px;
+  padding: 2px 7px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.dsb-file-card .dsb-file-dl:hover { color: #cdd6f4; border-color: #45475a; }
+.dsb-file-card .dsb-file-path {
+  margin-left: auto;
+  color: #6c7086;
+  font-size: 10px;
+  font-family: Consolas, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

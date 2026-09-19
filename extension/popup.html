@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<style>
+  body {
+    width: 320px; margin: 0; padding: 14px;
+    background: #11111b; color: #cdd6f4;
+    font: 13px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { font-size: 14px; font-weight: 500; margin: 0 0 4px; }
+  .status { display: flex; align-items: center; gap: 8px; margin: 10px 0; color: #a6adc8; font-size: 12px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #6c7086; flex: none; }
+  .dot.on { background: #a6e3a1; } .dot.off { background: #f38ba8; }
+  label { display: block; color: #6c7086; font-size: 11px; margin: 12px 0 4px; }
+  input {
+    width: 100%; box-sizing: border-box; background: #181825; color: #cdd6f4;
+    border: 1px solid #313244; border-radius: 8px; padding: 8px; font-family: Consolas, monospace; font-size: 12px;
+  }
+  button {
+    width: 100%; margin-top: 8px; background: #89b4fa; color: #11111b; border: 0;
+    border-radius: 8px; padding: 8px; font-size: 13px; font-weight: 500; cursor: pointer;
+  }
+  button:hover { filter: brightness(1.08); }
+  button.ghost { background: transparent; color: #cdd6f4; border: 1px solid #313244; }
+  button.small { padding: 6px; font-size: 12px; }
+  .row { display: flex; gap: 8px; }
+  .row button { flex: 1; }
+  .ws {
+    background: #181825; border: 1px solid #313244; border-radius: 8px;
+    padding: 7px 9px; font-family: Consolas, monospace; font-size: 11px;
+    color: #a6e3a1; word-break: break-all;
+  }
+  .hint { color: #6c7086; font-size: 11px; margin-top: 10px; }
+  .warn { color: #f9e2af; font-size: 11px; margin-top: 8px; display: none; }
+  .warn.show { display: block; }
+</style>
+</head>
+<body>
+  <h1>Дипсик Мост</h1>
+  <div class="status"><span class="dot" id="dot"></span><span id="status">проверка…</span></div>
+
+  <label>Рабочая папка</label>
+  <div class="ws" id="ws">—</div>
+  <div class="row">
+    <button class="ghost small" id="pick">Выбрать папку…</button>
+    <button class="ghost small" id="openWs">Открыть в проводнике</button>
+  </div>
+  <div class="warn" id="warn">Системный диалог откроется поверх — это окно закроется само. Папка применится, проверь при следующем открытии.</div>
+
+  <label for="path">Или ввести путь вручную</label>
+  <input id="path" type="text" placeholder="C:\Users\...\моя папка" spellcheck="false">
+  <button class="ghost small" id="applyPath">Применить путь</button>
+
+  <label for="token">Токен моста</label>
+  <input id="token" type="text" placeholder="вставьте токен из UI моста" spellcheck="false">
+
+  <button id="save">Сохранить и проверить</button>
+  <button class="ghost" id="open">Открыть UI моста</button>
+
+  <div class="hint">Мост: http://127.0.0.1:8443 — токен там на кнопке «Копировать токен». Мост должен быть запущен.</div>
+
+<script src="popup.js"></script>
+</body>
+</html>

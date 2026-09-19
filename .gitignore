@@ -1,0 +1,32 @@
+# --- Личные данные моста: сюда попадают рабочая папка, память модели и логи ---
+# Внутри .workbuddy-ai/ лежит память проекта и заметки — им не место в публичном репо.
+.workbuddy-ai/
+
+# Корзина инструмента delete (сюда уходит всё удалённое из рабочей папки)
+.trash/
+
+# --- Изолированные данные тестов ---
+# test.mjs пишет сюда, чтобы не трогать боевой ~/.dsbridge/
+.test-data/
+.test-workspace/
+.test-workspace-2/
+.test-extra/
+.test-extra-other/
+
+# --- Артефакты сборки ---
+# dsbridge.exe — ~83 МБ, его место в GitHub Releases, а не в истории коммитов
+bridge/dist/
+dist/
+bridge/dist/*.blob
+bridge/dist/*.cjs
+
+# --- Сгенерированные файлы ---
+# INSTRUCTION.preview.md собирается из content.js и tools.mjs:
+#   node extension/render-instruction.mjs
+INSTRUCTION.preview.md
+
+# --- Разное ---
+node_modules/
+*.log
+Thumbs.db
+Desktop.ini

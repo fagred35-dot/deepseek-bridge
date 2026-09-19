@@ -1,0 +1,27 @@
+{
+  "manifest_version": 3,
+  "name": "Дипсик Мост",
+  "version": "0.9.0",
+  "description": "Связывает веб-чат DeepSeek с локальной файловой системой через локальный мост.",
+  "permissions": ["storage"],
+  "host_permissions": [
+    "https://chat.deepseek.com/*",
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_title": "Дипсик Мост",
+    "default_popup": "popup.html"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://chat.deepseek.com/*"],
+      "js": ["content.js"],
+      "css": ["content.css"],
+      "run_at": "document_idle"
+    }
+  ]
+}
