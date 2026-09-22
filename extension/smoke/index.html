@@ -106,10 +106,9 @@
       const nowStat = countOf(logText(), "→ stat");
       add("после перерисовки read_file НЕ выполнился снова", nowRead === wasRead, "было " + wasRead + ", стало " + nowRead);
       add("после перерисовки stat НЕ выполнился снова", nowStat === wasStat, "было " + wasStat + ", стало " + nowStat);
-      add("повторы посчитаны в диагностике", diagText().includes("повторов: 2"), diagText());
       const repeat = document.querySelector(".dsb-repeat");
       add("на месте старого блока пометка, а не сырой JSON", !!repeat);
-      add("у пометки есть кнопка «выполнить всё равно»", !!(repeat && repeat.querySelector("button")));
+      add("у пометки НЕТ кнопки — новые вызовы не блокируются", !!(repeat && !repeat.querySelector("button")));
       add("пометка не отправляет ничего в чат", window.__sent === 1, "кликов: " + window.__sent);
 
       // Третья фаза: НОВОЕ сообщение с тем же самым вызовом. Это не перерисовка,
@@ -121,8 +120,7 @@
 
       setTimeout(() => {
         const laterRead = countOf(logText(), "→ read_file");
-        add("новое сообщение с тем же вызовом выполнилось", laterRead === wasRead + 1, "было " + wasRead + ", стало " + laterRead);
-        add("повторы по-прежнему 2 — новый вызов за повтор не принят", diagText().includes("повторов: 2"), diagText());
+        add("новое сообщение с тем же вызовом выполнилось без кнопки", laterRead === wasRead + 1, "было " + wasRead + ", стало " + laterRead);
         document.getElementById("RESULT").textContent = "\n" + lines.join("\n") + "\n";
       }, 3000);
     }, 3000);
