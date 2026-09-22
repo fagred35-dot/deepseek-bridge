@@ -187,15 +187,37 @@ function fuzzyPositions(text, oldStr) {
 
 // Возврат: позиции (index/length), признак «мягкого» совпадения и сдвиг отступа
 // между фрагментом в файле и тем, что прислала модель.
-function locateFragment(text, oldStr) {
-  const exact = [];
-  let idx = text.indexOf(oldStr);
-  while (idx !== -1 && exact.length < 50) {
-    exact.push({ index: idx, length: oldStr.length });
-    idx = text.indexOf(oldStr, idx + oldStr.length);
+function indexAll(text, needle) {
+  const out = [];
+  let idx = text.indexOf(needle);
+  while (idx !== -1 && out.length < 50) {
+    out.push({ index: idx, length: needle.length });
+    idx = text.indexOf(needle, idx + needle.length);
   }
+  return out;
+}
+
+function locateFragment(text, oldStr) {
+  // 1) Точное совпадение как есть.
+  const exact = indexAll(text, oldStr);
   if (exact.length) return { positions: exact, fuzzy: false, indentShift: 0 };
 
+  // 2) Точное совпадение с другим переводом строк. read_file отдаёт \n, а на
+  // диске файл может быть в \r\n — тогда old_string «не находится», хотя это
+  // ровно тот фрагмент. Пробуем оба направления, позиции остаются точными,
+  // поэтому файл по-прежнему не переписывается целиком.
+  if (oldStr.includes('\r\n') || oldStr.includes('\n')) {
+    const variants = new Set();
+    if (oldStr.includes('\r\n')) variants.add(oldStr.replace(/\r\n/g, '\n'));
+    if (/[^\r]\n/.test(oldStr) || oldStr.startsWith('\n')) variants.add(oldStr.replace(/\n/g, '\r\n'));
+    for (const variant of variants) {
+      if (!variant || variant === oldStr) continue;
+      const hit = indexAll(text, variant);
+      if (hit.length) return { positions: hit, fuzzy: false, indentShift: 0, eolNormalized: true };
+    }
+  }
+
+  // 3) Мягкое совпадение: отступы, хвостовые пробелы, переводы строк.
   const fuzzy = fuzzyPositions(text, oldStr);
   if (!fuzzy.length) return { positions: [], fuzzy: true, indentShift: 0 };
   return { positions: fuzzy, fuzzy: true, indentShift: indentShiftAt(text, fuzzy[0].index, oldStr) };
@@ -971,11 +993,17 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
         );
       }
 
+      // При точном совпадении с другим переводом строк (CRLF-файл, а модель
+      // прислала \n) приводим вставку к переводу строк файла — иначе получились
+      // бы смешанные \r\n и \n в одном файле.
+      const fileEol = text.includes('\r\n') ? '\r\n' : '\n';
+      const normalizedNew = located.eolNormalized ? newStr.replace(/\r?\n/g, fileEol) : newStr;
+
       // «Мягкое» совпадение — повод сказать об этом в ответе: правка применена,
       // но текст в файле отличался от того, что прислала модель.
       const finalNew = located.fuzzy
-        ? shiftIndent(newStr, located.indentShift, fileIndentAt(text, positions[0]), leadingWs(oldStr).length)
-        : newStr;
+        ? shiftIndent(normalizedNew, located.indentShift, fileIndentAt(text, positions[0]), leadingWs(oldStr).length)
+        : normalizedNew;
 
       const updated = replaceAll
         ? replaceSpans(text, located.positions, finalNew)
@@ -988,6 +1016,7 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
         firstLine: text.slice(0, positions[0]).split('\n').length,
         fuzzy: located.fuzzy,
         indentShift: located.fuzzy ? located.indentShift : 0,
+        ...(located.eolNormalized ? { eolNormalized: true, eol: fileEol } : {}),
         bytesBefore: st.size,
         bytesAfter: after.size,
       };
@@ -1063,9 +1092,12 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
 
         const firstLine = lineOf(text, positions[0]);
         const count = replaceAll ? positions.length : 1;
+        // Точное совпадение с другим переводом строк: приводим вставку к EOL файла.
+        const fileEol = text.includes('\r\n') ? '\r\n' : '\n';
+        const normalizedNew = located.eolNormalized ? newStr.replace(/\r?\n/g, fileEol) : newStr;
         const finalNew = located.fuzzy
-          ? shiftIndent(newStr, located.indentShift, fileIndentAt(text, positions[0]), leadingWs(oldStr).length)
-          : newStr;
+          ? shiftIndent(normalizedNew, located.indentShift, fileIndentAt(text, positions[0]), leadingWs(oldStr).length)
+          : normalizedNew;
         text = replaceAll
           ? replaceSpans(text, located.positions, finalNew)
           : text.slice(0, positions[0]) + finalNew + text.slice(positions[0] + located.positions[0].length);

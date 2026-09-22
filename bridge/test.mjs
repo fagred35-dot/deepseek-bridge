@@ -238,9 +238,13 @@ try {
   // Файл с CRLF, а модель прислала \n — раньше это был гарантированный ENOMATCH.
   await tool('write_file', { path: 'crlf.txt', content: 'первая\r\nвторая\r\n' });
   const f3 = await tool('edit_file', { path: 'crlf.txt', old_string: 'первая\nвторая', new_string: 'первая\nВТОРАЯ' });
-  check('перевод строк CRLF не мешает', f3.ok === true && f3.result.fuzzy === true, JSON.stringify(f3).slice(0, 240));
+  // CRLF ловится как ТОЧНОЕ совпадение с другим переводом строк (fuzzy:false,
+  // eolNormalized:true) — это не «мягкий» поиск, позиция найдена однозначно.
+  check('перевод строк CRLF не мешает', f3.ok === true && f3.result.fuzzy === false && f3.result.replacements === 1, JSON.stringify(f3).slice(0, 240));
   const f3r = await tool('read_file', { path: 'crlf.txt' });
   check('CRLF-файл правлен по существу', String(f3r.result.content).includes('ВТОРАЯ'), JSON.stringify(f3r.result.content));
+  check('CRLF-вставка сохранила \\r\\n, а не смешала переводы строк', /ВТОРАЯ\r\n/.test(f3r.result.content) && !/[^\r]\n/.test(f3r.result.content), JSON.stringify(f3r.result.content));
+  check('edit_file сообщил о нормализации EOL', f3.ok === true && f3.result.eolNormalized === true && f3.result.eol === '\r\n', JSON.stringify(f3).slice(0, 200));
 
   // Мягкий поиск не должен терять защиту от неоднозначности: иначе он заменит
   // не то место, и это хуже, чем честный отказ.
