@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Дымовой тест content.js</title>
+<style>body { background: #111; color: #eee; font: 14px sans-serif; }</style>
+</head>
+<body>
+<!-- Подделка чата: композер без textarea (проверяем общий путь и contenteditable),
+     кнопка отправки с меткой, скрытое поле загрузки. -->
+<div id="composer">
+  <div id="prompt" contenteditable="true" role="textbox" class="ProseMirror"></div>
+  <button id="send" aria-label="Send message"><svg width="16" height="16"></svg></button>
+  <input type="file" accept="image/*" id="file">
+</div>
+
+<!-- Лента сообщений. Её целиком перерисовывают в тесте: так ведёт себя настоящий
+     чат, когда прокручиваешь вверх — старые сообщения создаются заново. -->
+<div id="chat">
+<pre><code class="language-dsbridge">{ "tool": "read_file", "args": { "path": "notes.md" } }</code></pre>
+
+<!-- Разметка как у Qwen и Z.ai: блока нет ни в <pre>, ни в <code>, зато есть
+     контейнер с «code» в классе, а внутри — подпись языка и кнопка «копировать».
+     Пока разбор требовал, чтобы ВЕСЬ текст блока был JSON, такой вызов молча
+     пропускался. Этот блок обязан сработать наравне с обычным. -->
+<div class="qwen-markdown-code-block">
+  <div class="qwen-markdown-code-block-header"><span>dsbridge</span><button type="button">Копировать</button></div>
+  <div class="qwen-markdown-code-block-content">
+    <div class="qwen-markdown-code-line">{ "tool": "stat", "args": { "path": "notes.md" } }</div>
+  </div>
+</div>
+</div>
+
+<div id="RESULT">ещё не готово</div>
+
+<script>
+  window.__sent = 0;
+  document.getElementById("send").addEventListener("click", () => { window.__sent++; });
+  // Исходная разметка ленты: по ней будем имитировать перерисовку при прокрутке.
+  window.__chatHtml = document.getElementById("chat").innerHTML;
+
+  window.chrome = {
+    runtime: {
+      sendMessage: async (msg) => {
+        if (!msg) return { ok: false };
+        if (msg.type === "health") return { ok: true };
+        if (msg.type === "tools") return { ok: true, tools: [] };
+        if (msg.type === "tool") return { ok: true, result: { path: "notes.md", content: "привет из моста" } };
+        return { ok: false, error: { code: "EMSG", message: "нет такого запроса" } };
+      },
+    },
+    storage: { local: { get: async () => ({}), set: async () => {} } },
+  };
+</script>
+<script src="content.js"></script>
+<script>
+  // Даём скрипту время: два скана на «устоявшийся» блок, очередь 800 мс,
+  // отправка с паузой. Виртуальное время браузера ускоряет эти таймеры.
+  const lines = [];
+  const add = (name, cond, extra) => lines.push((cond ? "OK   " : "FAIL ") + name + (extra ? " :: " + extra : ""));
+  const logText = () => ((document.getElementById("dsb-log") || {}).textContent || "");
+  const diagText = () => ((document.getElementById("dsb-diag") || {}).textContent || "");
+  const countOf = (hay, needle) => hay.split(needle).length - 1;
+
+  setTimeout(() => {
+    const panel = document.getElementById("dsbridge-panel");
+    add("панель построена", !!panel);
+    add("в панели есть лог", !!(panel && panel.querySelector("#dsb-log")));
+    add("в панели есть чип сайта", !!(panel && panel.querySelector("#dsb-site")));
+    add("диагностика заполнена", diagText().includes("блоков:"), diagText());
+    add("сайт определён как общий", (document.getElementById("dsb-site") || {}).textContent.startsWith("Чат"),
+      (document.getElementById("dsb-site") || {}).textContent);
+
+    const prompt = document.getElementById("prompt");
+    const text = prompt ? prompt.textContent : "";
+    add("результат инструмента попал в поле ввода", text.includes("Результат") && text.includes("read_file"), JSON.stringify(text.slice(0, 120)));
+    add("в поле попал ответ моста", text.includes("привет из моста"));
+    add("кнопка отправки нажата", window.__sent > 0, "кликов: " + window.__sent);
+
+    add("в логе есть выполнение вызова", logText().includes("→ read_file"));
+    add("в логе есть отправка", logText().includes("результат отправлен автоматически"));
+    // Второй вызов — из разметки как у Qwen (контейнер с подписью языка).
+    add("вызов из блока без <pre>/<code> тоже выполнен", logText().includes("→ stat"), logText().slice(-160));
+
+    const hidden = document.querySelector("pre code.language-dsbridge");
+    add("сырой блок скрыт карточкой", hidden && hidden.closest("pre").style.display === "none");
+    const qwenBlock = document.querySelector(".qwen-markdown-code-block");
+    add("блок Qwen скрыт карточкой", qwenBlock && qwenBlock.style.display === "none");
+
+    const wasRead = countOf(logText(), "→ read_file");
+    const wasStat = countOf(logText(), "→ stat");
+    add("вызов read_file выполнен ровно один раз", wasRead === 1, "раз: " + wasRead);
+    add("вызов stat выполнен ровно один раз", wasStat === 1, "раз: " + wasStat);
+
+    // --- имитация прокрутки вверх ---
+    // Чат перерисовывает старые сообщения с нуля: метки data-dsb-done и наши
+    // карточки вместе с узлами пропадают, блоки снова выглядят как сырой JSON.
+    // Раньше от повтора спасало окно в 5 секунд — и через минуту прокрутка
+    // запускала старые команды заново.
+    const chat = document.getElementById("chat");
+    chat.innerHTML = window.__chatHtml;
+    add("лента перерисована, метки сброшены", !document.querySelector('[data-dsb-done="1"]'));
+
+    setTimeout(() => {
+      const nowRead = countOf(logText(), "→ read_file");
+      const nowStat = countOf(logText(), "→ stat");
+      add("после перерисовки read_file НЕ выполнился снова", nowRead === wasRead, "было " + wasRead + ", стало " + nowRead);
+      add("после перерисовки stat НЕ выполнился снова", nowStat === wasStat, "было " + wasStat + ", стало " + nowStat);
+      add("повторы посчитаны в диагностике", diagText().includes("повторов: 2"), diagText());
+      const repeat = document.querySelector(".dsb-repeat");
+      add("на месте старого блока пометка, а не сырой JSON", !!repeat);
+      add("у пометки есть кнопка «выполнить всё равно»", !!(repeat && repeat.querySelector("button")));
+      add("пометка не отправляет ничего в чат", window.__sent === 1, "кликов: " + window.__sent);
+
+      // Третья фаза: НОВОЕ сообщение с тем же самым вызовом. Это не перерисовка,
+      // а законный повтор — модель просит перечитать файл после правки. Такой
+      // вызов обязан выполниться, иначе дедупликация ломает рабочий сценарий.
+      const fresh = document.createElement("pre");
+      fresh.innerHTML = '<code class="language-dsbridge">{ "tool": "read_file", "args": { "path": "notes.md" } }</code>';
+      chat.append(fresh);
+
+      setTimeout(() => {
+        const laterRead = countOf(logText(), "→ read_file");
+        add("новое сообщение с тем же вызовом выполнилось", laterRead === wasRead + 1, "было " + wasRead + ", стало " + laterRead);
+        add("повторы по-прежнему 2 — новый вызов за повтор не принят", diagText().includes("повторов: 2"), diagText());
+        document.getElementById("RESULT").textContent = "\n" + lines.join("\n") + "\n";
+      }, 3000);
+    }, 3000);
+  }, 6000);
+</script>
+</body>
+</html>

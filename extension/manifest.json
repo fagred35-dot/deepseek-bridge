@@ -1,11 +1,10 @@
 {
   "manifest_version": 3,
   "name": "Дипсик Мост",
-  "version": "0.9.0",
-  "description": "Связывает веб-чат DeepSeek с локальной файловой системой через локальный мост.",
+  "version": "0.11.1",
+  "description": "Связывает веб-чаты (DeepSeek, Qwen, ChatGPT, Claude, Gemini и другие) с локальной файловой системой через локальный мост.",
   "permissions": ["storage"],
   "host_permissions": [
-    "https://chat.deepseek.com/*",
     "http://127.0.0.1/*",
     "http://localhost/*"
   ],
@@ -18,7 +17,28 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://chat.deepseek.com/*"],
+      "matches": [
+        "https://chat.deepseek.com/*",
+        "https://chat.qwen.ai/*",
+        "https://arena.ai/*",
+        "https://*.arena.ai/*",
+        "https://lmarena.ai/*",
+        "https://*.lmarena.ai/*",
+        "https://chat.z.ai/*",
+        "https://kimi.com/*",
+        "https://www.kimi.com/*",
+        "https://aistudio.google.com/*",
+        "https://chatgpt.com/*",
+        "https://chat.openai.com/*",
+        "https://gemini.google.com/*",
+        "https://claude.ai/*",
+        "https://copilot.microsoft.com/*",
+        "https://chat.mistral.ai/*",
+        "https://grok.com/*",
+        "https://agent.minimax.io/*",
+        "https://huggingface.co/chat/*",
+        "https://openrouter.ai/chat*"
+      ],
       "js": ["content.js"],
       "css": ["content.css"],
       "run_at": "document_idle"

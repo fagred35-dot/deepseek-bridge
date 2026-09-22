@@ -44,11 +44,27 @@ function transform(code, id) {
     const c = clause.trim();
     if (c.startsWith('{')) return `const ${c} = ${ref(spec)};`;
     if (c.startsWith('*')) return `const ${c.replace(/^\*\s*as\s*/, '')} = ${ref(spec)};`;
+    // Смешанная форма `import X, { a, b } from '...'`: имя по умолчанию плюс
+    // именованные. Без этой ветки получалось `const X, { a } = ...` — синтаксическая
+    // ошибка, и exe падал на старте (ловлено самопроверкой сборки 20.09.2026).
+    // __require кэширует модули, поэтому второй вызов — это тот же объект.
+    const mixed = /^([A-Za-z_$][\w$]*)\s*,\s*(\{[\s\S]*\})$/.exec(c);
+    if (mixed) return `const ${mixed[1]} = ${ref(spec)};\nconst ${mixed[2]} = ${ref(spec)};`;
     return `const ${c} = ${ref(spec)};`;
   });
 
   // `import './x.mjs';` — побочный эффект без привязки имени.
   code = code.replace(/^[ \t]*import\s+["']([^"']+)["'];?[ \t]*$/gm, (m, spec) => `${ref(spec)};`);
+
+  // Ни один import не должен пережить трансформер: непонятая форма раньше
+  // доезжала до exe как есть и падала уже на запущенном файле.
+  const leftoverImport = code.match(/^[ \t]*import[\s{"'*].*$/m);
+  if (leftoverImport) {
+    throw new Error(
+      `Не разобрал import в ${id}: ${leftoverImport.trim()}\n` +
+        'Бандлер умеет: import X from, import {a,b} from, import X, {a} from, import * as X from, import "./x.mjs".',
+    );
+  }
 
   code = code.replace(
     /^[ \t]*export\s+(async\s+function|function|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm,

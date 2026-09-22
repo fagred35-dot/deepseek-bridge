@@ -37,6 +37,11 @@ const srv = spawn(process.execPath, [path.join(__dirname, 'src', 'server.mjs')],
     DSBRIDGE_DATA: DATA,
     DSBRIDGE_PORT: String(PORT),
     DSBRIDGE_WORKSPACE: WORKSPACE,
+    // Тестовая рабочая папка лежит внутри проекта, а сам проект с 19.09.2026 —
+    // git-репозиторий. Без потолка `git status` находит родительский репозиторий
+    // и отвечает нулевым кодом, хотя тест проверяет «вне репозитория». Потолок
+    // запрещает git подниматься выше корня проекта.
+    GIT_CEILING_DIRECTORIES: path.resolve(__dirname, '..'),
   },
   stdio: 'ignore',
 });
@@ -143,6 +148,21 @@ try {
     'UI отдаётся, плейсхолдеры заменены',
     ui.status === 200 && ui.text.includes(TOKEN) && !ui.text.includes('__BRIDGE_TOKEN__') && !ui.text.includes('__WORKSPACE__'),
   );
+  check(
+    'в UI заменены все плейсхолдеры (порт и версия)',
+    !ui.text.includes('__PORT__') && !ui.text.includes('__VERSION__'),
+  );
+
+  // Страховка от переделки вёрстки: скрипт страницы ищет элементы по id, и
+  // пропавший id ломает интерфейс молча — страница открывается, кнопка не работает.
+  const REQUIRED_UI_IDS = [
+    'dot', 'status', 'open', 'pick', 'allowCmd', 'allowNet', 'extraRoots', 'addRoot',
+    'saveRoots', 'tools', 'instr', 'copyInstr', 'copyToken', 'reveal', 'tokenMasked', 'log',
+  ];
+  const missingIds = REQUIRED_UI_IDS.filter((id) => !ui.text.includes('id="' + id + '"'));
+  check('в UI на месте все элементы, к которым обращается скрипт', missingIds.length === 0, missingIds.join(', '));
+  check('в UI есть .path — по нему пишется выбранная папка', ui.text.includes('class="path'));
+  check('в инструкции UI есть раздел про память проекта', ui.text.includes('ПАМЯТЬ ПРОЕКТА'));
 
   const w = await tool('write_file', { path: 'notes.md', content: 'привет мир' });
   check('write_file создаёт файл', w.ok === true && w.result.bytes > 0, JSON.stringify(w));
@@ -182,6 +202,69 @@ try {
 
   const e8 = await tool('edit_file', { path: 'нет-такого.md', old_string: 'a', new_string: 'b' });
   check('edit_file на отсутствующий файл → ENOENT', e8.ok === false && e8.error.code === 'ENOENT', JSON.stringify(e8).slice(0, 240));
+
+  // --- мягкое совпадение (терпимость к отступам) ---
+  //
+  // Модель часто присылает блок без отступов или с чужими отступами. Раньше это
+  // давало ENOMATCH, лишний round-trip и риск поймать лимит частоты. Теперь
+  // правка применяется, а в ответе стоит fuzzy: true.
+  const indented = 'function a() {\n  const x = 1;\n  return x;\n}\n';
+  await tool('write_file', { path: 'fuzzy.js', content: indented });
+
+  const f0 = await tool('edit_file', { path: 'fuzzy.js', old_string: '  const x = 1;', new_string: '  const x = 9;' });
+  check('точное совпадение не помечается как мягкое', f0.ok === true && f0.result.fuzzy === false, JSON.stringify(f0).slice(0, 240));
+
+  const f1 = await tool('edit_file', {
+    path: 'fuzzy.js',
+    old_string: 'const x = 9;\nreturn x;',
+    new_string: 'const x = 2;\nreturn x + 1;',
+  });
+  check('правка без отступов применяется', f1.ok === true && f1.result.fuzzy === true, JSON.stringify(f1).slice(0, 260));
+  check('сдвиг отступа посчитан', f1.result && f1.result.indentShift === 2, JSON.stringify(f1.result));
+  const f1r = await tool('read_file', { path: 'fuzzy.js' });
+  check(
+    'отступ в файле сохранён, а не потерян',
+    f1r.result.content === 'function a() {\n  const x = 2;\n  return x + 1;\n}\n',
+    JSON.stringify(f1r.result.content),
+  );
+
+  // Хвостовые пробелы и пустая строка внутри фрагмента тоже не должны мешать.
+  await tool('write_file', { path: 'fuzzy2.txt', content: 'один   \nдва\n\nтри\n' });
+  const f2 = await tool('edit_file', { path: 'fuzzy2.txt', old_string: 'один\nдва', new_string: 'ОДИН\nДВА' });
+  check('хвостовые пробелы не мешают', f2.ok === true && f2.result.fuzzy === true, JSON.stringify(f2).slice(0, 240));
+  const f2r = await tool('read_file', { path: 'fuzzy2.txt' });
+  check('замена без потери остальных строк', f2r.result.content === 'ОДИН\nДВА\n\nтри\n', JSON.stringify(f2r.result.content));
+
+  // Файл с CRLF, а модель прислала \n — раньше это был гарантированный ENOMATCH.
+  await tool('write_file', { path: 'crlf.txt', content: 'первая\r\nвторая\r\n' });
+  const f3 = await tool('edit_file', { path: 'crlf.txt', old_string: 'первая\nвторая', new_string: 'первая\nВТОРАЯ' });
+  check('перевод строк CRLF не мешает', f3.ok === true && f3.result.fuzzy === true, JSON.stringify(f3).slice(0, 240));
+  const f3r = await tool('read_file', { path: 'crlf.txt' });
+  check('CRLF-файл правлен по существу', String(f3r.result.content).includes('ВТОРАЯ'), JSON.stringify(f3r.result.content));
+
+  // Мягкий поиск не должен терять защиту от неоднозначности: иначе он заменит
+  // не то место, и это хуже, чем честный отказ.
+  await tool('write_file', { path: 'amb.txt', content: 'a\n  a\n' });
+  const f4 = await tool('edit_file', { path: 'amb.txt', old_string: 'a ', new_string: 'b' });
+  check('мягкое совпадение тоже ловит неоднозначность', f4.ok === false && f4.error.code === 'EAMBIGUOUS', JSON.stringify(f4).slice(0, 260));
+
+  const f5 = await tool('edit_file', { path: 'amb.txt', old_string: 'a ', new_string: 'b', replace_all: true });
+  check('мягкое совпадение работает с replace_all', f5.ok === true && f5.result.replacements === 2, JSON.stringify(f5).slice(0, 240));
+
+  const f6 = await tool('edit_file', { path: 'amb.txt', old_string: 'совсем другой текст', new_string: 'x' });
+  check('мягкое совпадение не выдумывает совпадений → ENOMATCH', f6.ok === false && f6.error.code === 'ENOMATCH', JSON.stringify(f6).slice(0, 240));
+
+  const f7 = await tool('edit_many', {
+    path: 'fuzzy.js',
+    edits: [{ old: 'const x = 2;\nreturn x + 1;', new: 'const x = 5;\nreturn x;' }],
+  });
+  check('edit_many тоже терпит отступы', f7.ok === true && f7.result.results[0].fuzzy === true, JSON.stringify(f7).slice(0, 320));
+  const f7r = await tool('read_file', { path: 'fuzzy.js' });
+  check(
+    'edit_many с мягким совпадением сохранил отступы',
+    f7r.result.content === 'function a() {\n  const x = 5;\n  return x;\n}\n',
+    JSON.stringify(f7r.result.content),
+  );
 
   // --- edit_many ---
 

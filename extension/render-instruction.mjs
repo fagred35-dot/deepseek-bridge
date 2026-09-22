@@ -19,7 +19,9 @@ const root = join(here, "..");
 const SOURCE = readFileSync(join(here, "content.js"), "utf8");
 
 function extractConst(name) {
-  const re = new RegExp("const " + name + " = ([\\s\\S]*?);\\n");
+  // \s* вокруг "=" — иначе константа, у которой значение уехало на следующую
+  // строку, «не находится», и превью падает с невнятной ошибкой.
+  const re = new RegExp("const " + name + "\\s*=\\s*([\\s\\S]*?);\\n");
   const m = re.exec(SOURCE);
   if (!m) throw new Error("не нашёл константу " + name + " в content.js");
   return m[1];
@@ -39,20 +41,53 @@ const body = [
   "const FALLBACK_TOOL_NAMES = " + extractConst("FALLBACK_TOOL_NAMES") + ";",
   "const INSTRUCTION_INTRO = " + extractConst("INSTRUCTION_INTRO") + ";",
   "const INSTRUCTION_OUTRO = " + extractConst("INSTRUCTION_OUTRO") + ";",
+  "const INSTRUCTION_MEMORY = " + extractConst("INSTRUCTION_MEMORY") + ";",
+  "const INSTRUCTION_TOOLS_HEADER = " + extractConst("INSTRUCTION_TOOLS_HEADER") + ";",
+  "const MEMORY_FILE = " + extractConst("MEMORY_FILE") + ";",
+  "const MEMORY_INJECT_LIMIT = " + extractConst("MEMORY_INJECT_LIMIT") + ";",
+  "let projectMemoryState = 'не прочитана';",
   extractFunction("describeTool"),
   extractFunction("buildToolList"),
+  extractFunction("memoryBlock"),
+  extractFunction("readProjectMemory"),
   extractFunction("buildInstruction"),
 ].join("\n");
 
-function makeChrome(reply) {
-  return { runtime: { sendMessage: async () => reply } };
+// Заглушка chrome должна различать запросы: список инструментов и чтение памяти
+// идут одним ходом (Promise.all), и один и тот же ответ на оба запроса дал бы
+// «мост не ответил» вместо настоящего блока памяти.
+function makeChrome(reply, memory) {
+  return {
+    runtime: {
+      sendMessage: async (msg) => {
+        if (!reply) throw new Error("мост недоступен");
+        if (msg && msg.type === "tools") return reply;
+        if (msg && msg.type === "tool" && msg.tool === "read_file") {
+          if (memory == null) return { ok: false, error: { code: "ENOENT", message: "файла нет" } };
+          return { ok: true, result: { content: memory } };
+        }
+        return { ok: false, error: { code: "EMSG", message: "неизвестный запрос" } };
+      },
+    },
+  };
 }
 
-const build = (reply) =>
-  new Function("chrome", body + "\nreturn buildInstruction;")(makeChrome(reply));
+// Пример памяти проекта — как она выглядит в рабочей папке.
+const SAMPLE_MEMORY = [
+  "# Мой проект — заметки",
+  "",
+  "**Что это:** веб-приложение на Vite + React.",
+  "**Команды:** `npm run dev` (порт 5173) · `npm test` (vitest).",
+  "**Конвенции:** компоненты в `src/components`, стили рядом с компонентом.",
+  "**Открытые хвосты:** тест на оплату падает на таймауте.",
+].join("\n");
 
-const live = await build({ ok: true, tools: TOOLS })();
-const dead = await build(null)();
+const build = (reply, memory) =>
+  new Function("chrome", body + "\nreturn buildInstruction;")(makeChrome(reply, memory));
+
+const live = await build({ ok: true, tools: TOOLS }, SAMPLE_MEMORY)();
+const noMemory = await build({ ok: true, tools: TOOLS }, null)();
+const dead = await build(null, null)();
 
 const header = [
   "<!-- Сгенерировано: node extension/render-instruction.mjs -->",
@@ -64,7 +99,8 @@ const header = [
     `инструментов в реестре: **${TOOLS.length}**`,
   "",
   "Ниже — ровно тот текст, который попадает в поле ввода по кнопке",
-  "«Вставить инструкцию для модели».",
+  "«Вставить инструкцию для модели». Память проекта (MEMORY.md рабочей папки)",
+  "подставляется в начало — здесь она заполнена примером.",
   "",
   "---",
   "",
@@ -74,6 +110,11 @@ const footer = [
   "",
   "",
   "---",
+  "",
+  "## Если памяти проекта нет",
+  "",
+  `Вместо содержимого вставляется честная пометка (текст длиной ${noMemory.length} символов): ` +
+    "«файла нет или он пуст — создай, когда появится что записать».",
   "",
   "## Если мост не ответил",
   "",
@@ -85,4 +126,4 @@ const footer = [
 const out = join(root, "INSTRUCTION.preview.md");
 writeFileSync(out, header + live + footer, "utf8");
 console.log("записано:", out);
-console.log("с живым мостом:", live.length, "символов; без моста:", dead.length);
+console.log("с памятью:", live.length, "символов; без памяти:", noMemory.length, "; без моста:", dead.length);

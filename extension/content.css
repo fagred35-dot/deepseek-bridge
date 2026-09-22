@@ -2,7 +2,7 @@
   position: fixed;
   right: 16px;
   bottom: 16px;
-  width: 320px;
+  width: 336px;
   z-index: 2147483646;
   background: #1e1e2e;
   color: #cdd6f4;
@@ -19,6 +19,23 @@
   padding: 10px 12px;
   background: #181825;
   border-bottom: 1px solid #313244;
+  /* Заголовок — ручка для переноса панели: на части чатов композер стоит ровно
+     там, где панель по умолчанию. */
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+#dsbridge-panel .dsb-head:active { cursor: grabbing; }
+/* Чип с именем чата: на пятнадцати сайтах иначе непонятно, какой адаптер сработал. */
+#dsbridge-panel .dsb-site {
+  flex: none;
+  font-size: 10px;
+  line-height: 1.6;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(137, 180, 250, 0.14);
+  border: 1px solid rgba(137, 180, 250, 0.32);
+  color: #89b4fa;
 }
 #dsbridge-panel .dsb-dot {
   width: 8px;
@@ -29,7 +46,7 @@
 }
 #dsbridge-panel .dsb-dot.on { background: #a6e3a1; }
 #dsbridge-panel .dsb-dot.off { background: #f38ba8; }
-#dsbridge-panel .dsb-title { font-weight: 500; }
+#dsbridge-panel .dsb-title { font-weight: 500; flex: none; }
 #dsbridge-panel .dsb-status {
   flex: 1;
   color: #6c7086;
@@ -206,6 +223,23 @@
   font: 12px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
   color: #cdd6f4;
 }
+
+/* Пометка на месте перерисованного старого сообщения: вызов уже выполнялся. */
+.dsb-repeat {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0;
+  background: #181825;
+  border: 1px dashed #313244;
+  border-left: 3px solid #6c7086;
+  border-radius: 8px;
+  padding: 7px 10px;
+  font: 12px/1.5 -apple-system, "Segoe UI", Roboto, sans-serif;
+  color: #a6adc8;
+}
+.dsb-repeat .dsb-repeat-mark { color: #6c7086; font-size: 13px; }
+.dsb-repeat .dsb-repeat-text { opacity: 0.85; }
 .dsb-file-card .dsb-file-link {
   color: #89b4fa;
   text-decoration: none;

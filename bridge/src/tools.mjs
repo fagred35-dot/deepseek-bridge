@@ -148,6 +148,106 @@ function detectAndDecode(buf, requested) {
 
 const splitLines = (s) => String(s).replace(/\r\n?/g, '\n').replace(/\n$/, '').split('\n');
 
+// --- поиск фрагмента для правок ---
+//
+// Точное совпадение всегда первый вариант. Если его нет — пробуем совпадение,
+// устойчивое к отступам, хвостовым пробелам и переводам строк: модель часто
+// копирует блок из другого места файла или теряет отступ при пересказе. Так же
+// ведёт себя str_replace в VS Code. Без этого правка падает с ENOMATCH, модель
+// перечитывает файл и тратит лишний round-trip — а лимит частоты у чата не резиновый.
+//
+// Позиции возвращаются в ИСХОДНОМ тексте: замена идёт по нему, а не по
+// нормализованной копии, поэтому файл не переписывается целиком.
+
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+function fuzzyPositions(text, oldStr) {
+  const lines = oldStr.split('\n').map((line) => line.trim());
+  if (!lines.some((l) => l)) return [];
+  const pattern = lines
+    .map((line) => (line ? escapeRe(line).replace(/[ \t]+/g, '[ \\t]+') : ''))
+    .join('[ \\t]*\\r?\\n[ \\t]*');
+  let re;
+  try {
+    re = new RegExp(pattern, 'g');
+  } catch {
+    return []; // на всякий случай: нерегулярный шаблон не должен ронять правку
+  }
+  const out = [];
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out.push({ index: m.index, length: m[0].length });
+    if (out.length >= 50) break;
+    if (re.lastIndex === m.index) re.lastIndex++; // пустое совпадение — иначе цикл
+  }
+  return out;
+}
+
+// Возврат: позиции (index/length), признак «мягкого» совпадения и сдвиг отступа
+// между фрагментом в файле и тем, что прислала модель.
+function locateFragment(text, oldStr) {
+  const exact = [];
+  let idx = text.indexOf(oldStr);
+  while (idx !== -1 && exact.length < 50) {
+    exact.push({ index: idx, length: oldStr.length });
+    idx = text.indexOf(oldStr, idx + oldStr.length);
+  }
+  if (exact.length) return { positions: exact, fuzzy: false, indentShift: 0 };
+
+  const fuzzy = fuzzyPositions(text, oldStr);
+  if (!fuzzy.length) return { positions: [], fuzzy: true, indentShift: 0 };
+  return { positions: fuzzy, fuzzy: true, indentShift: indentShiftAt(text, fuzzy[0].index, oldStr) };
+}
+
+// Насколько отступ найденного фрагмента в файле отличается от отступа old_string.
+function indentShiftAt(text, index, oldStr) {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+  const fileIndent = (/^[ \t]*/.exec(text.slice(lineStart, index)) || [''])[0];
+  const oldIndent = (/^[ \t]*/.exec(oldStr) || [''])[0];
+  return fileIndent.length - oldIndent.length;
+}
+
+// Сдвигаем new_string так, чтобы отступы совпали с тем, как блок стоял в файле.
+// Тонкость: «мягкое» совпадение начинается с первого НЕпробельного символа, то
+// есть отступ первой строки остаётся в тексте снаружи замены. Поэтому первой
+// строке достаётся только её собственное отличие от old_string, а остальным —
+// ещё и разница отступов между файлом и old_string.
+function shiftIndent(newStr, delta, fileIndent, oldIndentLen) {
+  const ch = fileIndent.includes('\t') ? '\t' : ' ';
+  return newStr
+    .split('\n')
+    .map((line, i) => {
+      if (!line.trim()) return line;
+      const own = leadingWs(line).length;
+      const add = i === 0 ? own - oldIndentLen : own + delta;
+      if (add >= 0) return ch.repeat(add) + line;
+      // Отступ в файле меньше — срезаем лишнее с начала строки.
+      let cut = 0;
+      while (cut < -add && (line[cut] === ' ' || line[cut] === '\t')) cut++;
+      return line.slice(cut);
+    })
+    .join('\n');
+}
+
+function leadingWs(line) {
+  return (/^[ \t]*/.exec(line) || [''])[0];
+}
+
+function fileIndentAt(text, index) {
+  const lineStart = text.lastIndexOf('\n', index - 1) + 1;
+  return (/^[ \t]*/.exec(text.slice(lineStart, index)) || [''])[0];
+}
+
+// Замена по позициям. Для replace_all идём с конца: иначе после первой замены
+// все следующие позиции сдвинутся и текст поедет.
+function replaceSpans(text, positions, newStr) {
+  let out = text;
+  for (let i = positions.length - 1; i >= 0; i--) {
+    out = out.slice(0, positions[i].index) + newStr + out.slice(positions[i].index + positions[i].length);
+  }
+  return out;
+}
+
 // LCS-диф. Для очень больших файлов (n*m > 4M) не строим таблицу, а честно
 // помечаем всё как удалённое+добавленное — иначе теряем память на пустом месте.
 function diffOps(a, b) {
@@ -465,7 +565,9 @@ export const TOOLS = [
   },
   {
     name: 'edit_file',
-    description: 'Точечная замена фрагмента в файле — без перезаписи всего файла',
+    description:
+      'Точечная замена фрагмента в файле — без перезаписи всего файла. Если точного совпадения нет, ' +
+      'ищет устойчиво к отступам и хвостовым пробелам (в ответе fuzzy: true)',
     parameters: {
       path: 'строка',
       old_string: 'строка, что заменить (должна встречаться ровно один раз, если replace_all=false)',
@@ -475,7 +577,9 @@ export const TOOLS = [
   },
   {
     name: 'edit_many',
-    description: 'Пакет точечных правок в одном файле — один вызов вместо многих edit_file',
+    description:
+      'Пакет точечных правок в одном файле — один вызов вместо многих edit_file. ' +
+      'Как и edit_file, терпит различия в отступах (в ответе fuzzy: true)',
     parameters: {
       path: 'строка',
       edits: 'массив правок [{ old, new, replace_all? }], до 100 штук',
@@ -827,12 +931,10 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
 
       // Считаем вхождения: неоднозначную замену не делаем, а показываем,
       // где именно нашлось — иначе модель правит не то место.
-      const positions = [];
-      let idx = text.indexOf(oldStr);
-      while (idx !== -1 && positions.length < 50) {
-        positions.push(idx);
-        idx = text.indexOf(oldStr, idx + oldStr.length);
-      }
+      // Нет точного совпадения — locateFragment пробует «мягкое» (без учёта
+      // отступов и хвостовых пробелов).
+      const located = locateFragment(text, oldStr);
+      const positions = located.positions.map((p) => p.index);
       if (!positions.length) {
         throw toolError('ENOMATCH', 'old_string не найдена в файле — прочитай файл заново и скопируй фрагмент точно');
       }
@@ -847,13 +949,23 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
         );
       }
 
-      const updated = replaceAll ? text.split(oldStr).join(newStr) : text.slice(0, positions[0]) + newStr + text.slice(positions[0] + oldStr.length);
+      // «Мягкое» совпадение — повод сказать об этом в ответе: правка применена,
+      // но текст в файле отличался от того, что прислала модель.
+      const finalNew = located.fuzzy
+        ? shiftIndent(newStr, located.indentShift, fileIndentAt(text, positions[0]), leadingWs(oldStr).length)
+        : newStr;
+
+      const updated = replaceAll
+        ? replaceSpans(text, located.positions, finalNew)
+        : text.slice(0, positions[0]) + finalNew + text.slice(positions[0] + located.positions[0].length);
       await fsp.writeFile(abs, updated, 'utf8');
       const after = await fsp.stat(abs);
       return {
         path: rel(root, abs),
         replacements: replaceAll ? positions.length : 1,
         firstLine: text.slice(0, positions[0]).split('\n').length,
+        fuzzy: located.fuzzy,
+        indentShift: located.fuzzy ? located.indentShift : 0,
         bytesBefore: st.size,
         bytesAfter: after.size,
       };
@@ -896,12 +1008,9 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
 
         // Считаем вхождения в ТЕКУЩЕМ (уже частично правленом) тексте —
         // правки применяются последовательно, как если бы шли по одной.
-        const positions = [];
-        let idx = text.indexOf(oldStr);
-        while (idx !== -1 && positions.length < 50) {
-          positions.push(idx);
-          idx = text.indexOf(oldStr, idx + oldStr.length);
-        }
+        // Мягкое совпадение (без учёта отступов) — как в edit_file.
+        const located = locateFragment(text, oldStr);
+        const positions = located.positions.map((p) => p.index);
 
         if (!positions.length) {
           const err = { index: i, code: 'ENOMATCH', message: `Правка #${i + 1}: old не найдена в текущем тексте` };
@@ -921,10 +1030,13 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
 
         const firstLine = lineOf(text, positions[0]);
         const count = replaceAll ? positions.length : 1;
+        const finalNew = located.fuzzy
+          ? shiftIndent(newStr, located.indentShift, fileIndentAt(text, positions[0]), leadingWs(oldStr).length)
+          : newStr;
         text = replaceAll
-          ? text.split(oldStr).join(newStr)
-          : text.slice(0, positions[0]) + newStr + text.slice(positions[0] + oldStr.length);
-        results.push({ index: i, ok: true, replacements: count, firstLine });
+          ? replaceSpans(text, located.positions, finalNew)
+          : text.slice(0, positions[0]) + finalNew + text.slice(positions[0] + located.positions[0].length);
+        results.push({ index: i, ok: true, replacements: count, firstLine, fuzzy: located.fuzzy });
       }
 
       const applied = results.filter((r) => r.ok).length;
