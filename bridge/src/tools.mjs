@@ -119,7 +119,9 @@ function cyrScore(s) {
 }
 
 function detectAndDecode(buf, requested) {
-  const req = String(requested || 'utf8').toLowerCase();
+  // По умолчанию — auto: старый Windows-файл в cp1251 больше не отдаёт мусор,
+  // а UTF-8 распознаётся как UTF-8. Явная кодировка по-прежнему главнее.
+  const req = String(requested || 'auto').toLowerCase();
   if (req && req !== 'auto') {
     const enc = ENC_ALIASES[req] || req;
     return { text: decodeWith(buf, enc), encoding: enc, binary: looksBinary(buf) };
@@ -555,9 +557,10 @@ export const TOOLS = [
       recursive: 'boolean, обойти вложенные папки (по умолчанию false)',
       maxDepth: 'число, глубина обхода при recursive, по умолчанию 3 (до 10)',
       glob: 'строка, фильтр имён, например "*.js" (только при recursive)',
+      withStat: 'boolean, добавить mtimeMs и mtime к каждому элементу (по умолчанию false)',
     },
   },
-  { name: 'read_file', description: 'Прочитать текстовый файл', parameters: { path: 'строка', encoding: 'utf8 (по умолчанию) | auto | cp1251 | cp866 | utf16le | latin1' } },
+  { name: 'read_file', description: 'Прочитать текстовый файл', parameters: { path: 'строка', encoding: 'auto (по умолчанию, определяет кодировку) | utf8 | cp1251 | cp866 | utf16le | latin1' } },
   {
     name: 'write_file',
     description: 'Записать файл целиком',
@@ -582,7 +585,7 @@ export const TOOLS = [
       'Как и edit_file, терпит различия в отступах (в ответе fuzzy: true)',
     parameters: {
       path: 'строка',
-      edits: 'массив правок [{ old, new, replace_all? }], до 100 штук',
+      edits: 'массив правок [{ old|old_string, new|new_string, replace_all? }], до 100 штук',
       atomic: 'boolean, по умолчанию true — при любой неудаче не менять файл вовсе; false — применить удачные, пропущенные вернуть в failed',
       dry_run: 'boolean, только показать, что нашлось бы, без записи на диск (по умолчанию false)',
     },
@@ -678,7 +681,10 @@ export const TOOLS = [
     description: 'Скриншот окна, всего экрана или веб-страницы (png в рабочую папку)',
     parameters: {
       url: 'строка — страница: локальный файл рабочей папки (например "index.html") или http(s)-адрес (нужен allowNetwork)',
-      window: 'строка, часть заголовка окна (пусто = весь экран)',
+      window: 'строка, часть заголовка окна, без учёта регистра (пусто = весь экран)',
+      process: 'строка, часть имени процесса окна (например "chrome") — надёжнее заголовка',
+      handle: 'число, HWND окна из list_windows — самый точный способ выбрать окно',
+      foreground: 'boolean, поднять окно на передний план перед снимком (свёрнутое развернётся)',
       path: 'строка, куда сохранить png',
       width: 'число, ширина страницы, по умолчанию 1280',
       height: 'число, высота страницы, по умолчанию 900 (до 12000)',
@@ -690,7 +696,11 @@ export const TOOLS = [
   },
   {
     name: 'run_command',
-    description: 'Выполнить команду в PowerShell / cmd / bash (рабочая папка как cwd)',
+    description:
+      'Выполнить команду в PowerShell / cmd / bash (рабочая папка как cwd). ' +
+      'На Windows пайп (| findstr) часто даёт пустой stdout — надёжнее писать вывод в файл ' +
+      '(`... > build.log 2>&1`) и читать его через read_file. env — это объект, %VAR% в нём ' +
+      'не раскрывается: чтобы добавить к PATH, указывай полный путь.',
     parameters: {
       command: 'строка',
       shell: 'powershell | cmd | bash',
@@ -824,19 +834,26 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
     case 'list_dir': {
       const abs = jail(args.path || '.');
       const recursive = args.recursive === true;
+      // withStat отдаёт mtimeMs и размер одним заходом — иначе модель дёргает
+      // stat на каждый файл, чтобы понять, что менялось последним.
+      const withStat = args.withStat === true;
+      const statFields = (st) =>
+        withStat ? { size: st.size, mtimeMs: st.mtimeMs, mtime: new Date(st.mtimeMs).toISOString() } : {};
       if (!recursive) {
         const entries = await fsp.readdir(abs, { withFileTypes: true });
         const items = [];
         for (const e of entries) {
           const full = path.join(abs, e.name);
           let size = null;
+          let extra = {};
           try {
             const st = await fsp.stat(full);
             if (!e.isDirectory()) size = st.size;
+            if (withStat) extra = statFields(st);
           } catch {
             size = null;
           }
-          items.push({ name: e.name, type: e.isDirectory() ? 'dir' : 'file', size });
+          items.push({ name: e.name, type: e.isDirectory() ? 'dir' : 'file', size, ...extra });
         }
         items.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === 'dir' ? -1 : 1));
         return { path: rel(root, abs), items };
@@ -866,14 +883,17 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
           const relPath = rel(root, full);
           if (!globRe || globRe.test(e.name) || relPath.endsWith(globRaw)) {
             let size = null;
+            let extra = {};
             if (!e.isDirectory()) {
               try {
-                size = (await fsp.stat(full)).size;
+                const st = await fsp.stat(full);
+                size = st.size;
+                if (withStat) extra = statFields(st);
               } catch {
                 size = null;
               }
             }
-            items.push({ path: relPath, name: e.name, type: e.isDirectory() ? 'dir' : 'file', size, depth });
+            items.push({ path: relPath, name: e.name, type: e.isDirectory() ? 'dir' : 'file', size, depth, ...extra });
           }
           if (e.isDirectory()) await walkRec(full, depth + 1);
         }
@@ -895,6 +915,8 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
         bytes: buf.length,
         truncated,
         encoding: decoded.encoding,
+        // Явный дубль поля: модели проще заметить detectedEncoding, чем encoding.
+        detectedEncoding: decoded.encoding,
         binary: decoded.binary,
         content: decoded.text,
       };
@@ -983,8 +1005,19 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
         if (!e || typeof e !== 'object' || Array.isArray(e)) {
           throw toolError('EARGS', `Правка #${i + 1}: ожидается объект { old, new, replace_all? }`);
         }
-        const oldStr = String(e.old ?? '');
-        const newStr = String(e.new ?? '');
+        // Принимаем оба набора ключей: { old, new } и { old_string, new_string } —
+        // модель по привычке от edit_file пишет вторую пару, а раньше это давало
+        // невнятное «old не может быть пустой».
+        const oldRaw = e.old ?? e.old_string;
+        const newRaw = e.new ?? e.new_string;
+        if (oldRaw == null && newRaw == null) {
+          throw toolError(
+            'EARGS',
+            `Правка #${i + 1}: нет поля old (или old_string) — ожидается { old, new } либо { old_string, new_string }`,
+          );
+        }
+        const oldStr = String(oldRaw ?? '');
+        const newStr = String(newRaw ?? '');
         if (!oldStr) throw toolError('EARGS', `Правка #${i + 1}: old не может быть пустой`);
         if (oldStr === newStr) throw toolError('EARGS', `Правка #${i + 1}: old и new совпадают — менять нечего`);
         return { oldStr, newStr, replaceAll: e.replace_all === true };
@@ -1397,7 +1430,12 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
         throw toolError('EWIN', 'не удалось разобрать ответ: ' + res.stdout.slice(0, 200));
       }
       const list = Array.isArray(parsed) ? parsed : [parsed];
-      return { count: list.length, windows: list.map((w) => ({ process: w.process, title: w.title })) };
+      // handle — HWND: передай его в screenshot { handle }, чтобы снять ровно это
+      // окно, а не угадывать заголовок.
+      return {
+        count: list.length,
+        windows: list.map((w) => ({ process: w.process, title: w.title, handle: w.handle, pid: w.id })),
+      };
     }
 
     case 'screenshot': {
@@ -1459,9 +1497,17 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
 
       const script = screenshotScriptPath();
       const outSlash = abs.split(path.sep).join('/');
-      const cmd = args.window
-        ? `& ${psQuote(script)} -Mode window -Match ${psQuote(args.window)} -Out ${psQuote(outSlash)}`
-        : `& ${psQuote(script)} -Mode screen -Out ${psQuote(outSlash)}`;
+      const wantWindow = args.window || args.process || args.handle != null;
+      const parts = [
+        `& ${psQuote(script)} -Mode ${wantWindow ? 'window' : 'screen'}`,
+        '-Out',
+        psQuote(outSlash),
+      ];
+      if (args.window) parts.push('-Match', psQuote(args.window));
+      if (args.process) parts.push('-Process', psQuote(args.process));
+      if (args.handle != null && args.handle !== '') parts.push('-Handle', String(Math.trunc(Number(args.handle))));
+      if (args.foreground === true) parts.push('-Foreground');
+      const cmd = parts.join(' ');
       const res = await runShell({ shell: 'powershell', command: cmd, timeoutMs: 45000 });
       if (res.exitCode !== 0) throw toolError('ESHOT', (res.stderr || 'скриншот не удался').trim().slice(0, 300));
       const st = await fsp.stat(abs);

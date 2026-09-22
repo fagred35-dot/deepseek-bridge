@@ -8,6 +8,11 @@
 //  - отправка идёт через шлюз с паузой, иначе чат отвечает «Слишком частые сообщения».
 (() => {
   const PANEL_ID = "dsbridge-panel";
+  // Панель живёт в собственном host-контейнере на <html>, а не в <body>: у чатов
+  // на предке body часто висит transform, который превращает position:fixed в
+  // position:absolute относительно этого предка — и панель «уплывает». Плюс
+  // host с inset:0 не даёт overflow родителя обрезать её по краю экрана.
+  const PANEL_HOST_ID = "dsbridge-host";
   const pending = new WeakMap();
   // Разбор блока по узлу: { text, spec }. Нужен, чтобы не парсить один и тот же
   // JSON на каждом проходе скана (нумерация блоков требует знать сигнатуру и у
@@ -667,8 +672,10 @@
     "ТОНКОСТИ, КОТОРЫЕ ЭКОНОМЯТ ХОДЫ",
     "- Файлы могут меняться во время сессии (идёт сборка, работает другой процесс). Если grep",
     "  не находит то, что должно быть, — перечитай файл, прежде чем делать вывод.",
-    "- read_file по умолчанию читает как UTF-8. Для старых Windows-файлов (cp1251/cp866) бери",
-    "  encoding: \"auto\" — мост определит кодировку и скажет, что распознал.",
+    "- read_file сам определяет кодировку (cp1251/cp866/UTF-8) и в ответе отдаёт encoding и",
+    "  detectedEncoding. encoding: \"auto\" — тот же режим явно; можно указать конкретную.",
+    "- На Windows пайп в run_command (| findstr) часто даёт пустой stdout: пиши вывод в файл",
+    "  (`... > build.log 2>&1`) и читай его через read_file. env — объект, %VAR% не раскрывается.",
     "- При пересборке моста вызовы могут молча теряться (EBRIDGE). Это НЕ «лимит шагов»: связь",
     "  рвётся, файлы на диске целы. Подожди и повтори.",
     "- Пути наружу отдаются в POSIX-виде (/), а для дополнительных папок — абсолютными. Не",
@@ -800,6 +807,20 @@
 
   // ---------- панель ----------
 
+  // Host-контейнер панели. all:initial снимает унаследованные стили чата,
+  // position:fixed + inset:0 — оверлей на весь экран, не зависящий от разметки
+  // страницы; pointer-events:none пропускает клики мимо панели.
+  function panelHost() {
+    let host = document.getElementById(PANEL_HOST_ID);
+    if (host) return host;
+    host = document.createElement("div");
+    host.id = PANEL_HOST_ID;
+    host.style.cssText =
+      "all: initial; position: fixed; inset: 0; z-index: 2147483646; pointer-events: none;";
+    document.documentElement.appendChild(host);
+    return host;
+  }
+
   function buildPanel() {
     if (document.getElementById(PANEL_ID)) return;
     const panel = el("div");
@@ -828,7 +849,7 @@
       '  <div class="dsb-log" id="dsb-log"></div>',
       "</div>",
     ].join("");
-    document.body.appendChild(panel);
+    panelHost().appendChild(panel);
     makePanelDraggable(panel);
     applyPanelPos();
 
@@ -1058,12 +1079,18 @@
 
   // Сигнатура вызова: по ней отличаем повтор от новой команды. Аргументы входят
   // целиком — «прочитать другой файл» это уже другая команда.
-  function signatureOf(spec) {
-    return (
+  //
+  // Второй аргумент (node) не используется: попытка учесть «контекст сообщения»
+  // ломала счётчик — в текст контейнера попадали наши же карточки результатов,
+  // отпечаток менялся от прохода к проходу, и перерисовка переставала опознаваться.
+  // Оставлен в подписи, чтобы не трогать вызовы.
+  function signatureOf(spec, node) {
+    void node;
+    const base =
       spec.kind +
       "|" +
-      (spec.kind === "tool" ? spec.tool + "|" + stableJson(spec.args) : spec.src || spec.path)
-    );
+      (spec.kind === "tool" ? spec.tool + "|" + stableJson(spec.args) : spec.src || spec.path);
+    return base;
   }
 
   // Защита от повторного выполнения одного и того же блока.
@@ -1198,7 +1225,8 @@
       again.addEventListener("click", () => {
         again.remove();
         // Счётчик поднимаем, иначе следующий проход снова сочтёт блок повтором.
-        executedCount.set(signatureOf(spec), (executedCount.get(signatureOf(spec)) || 0) + 1);
+        const repSig = signatureOf(spec, codeEl);
+        executedCount.set(repSig, (executedCount.get(repSig) || 0) + 1);
         const ui = renderCallCard(codeEl, spec);
         queue.push({ call: spec, ui });
         clearTimeout(queueTimer);
@@ -1260,7 +1288,32 @@
     }
   }
 
+  // Очередь выполнялась одной функцией, но защита от повторного входа
+  // отсутствовала: пока await callTool ждал мост, следующий скан успевал
+  // запустить flushQueue второй раз — и два вызова шли параллельно. На git это
+  // выглядело как гонка: `add` и `commit` уходили одновременно, и commit
+  // отвечал «nothing to commit». Теперь в полёте ровно один прогон; если во
+  // время него пришли новые вызовы — крутимся ещё раз.
+  let flushing = false;
+  let flushPending = false;
+
   async function flushQueue() {
+    if (flushing) {
+      flushPending = true;
+      return;
+    }
+    flushing = true;
+    try {
+      do {
+        flushPending = false;
+        await flushQueueInner();
+      } while (flushPending || queue.length);
+    } finally {
+      flushing = false;
+    }
+  }
+
+  async function flushQueueInner() {
     const items = queue.splice(0, queue.length);
     if (!items.length) return;
     addLog("выполняю вызовов: " + items.length);
@@ -1587,7 +1640,7 @@
       }
       if (!spec) return;
 
-      const sig = signatureOf(spec);
+      const sig = signatureOf(spec, node);
 
       // Нумерацию ведём ДО проверки метки: уже выполненный блок тоже занимает
       // своё место в ленте. Иначе он не попадёт в счёт, и новый блок с тем же

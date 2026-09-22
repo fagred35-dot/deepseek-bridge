@@ -354,6 +354,22 @@ try {
   const m11 = await tool('edit_many', { path: 'нет-такого.txt', edits: [{ old: 'a', new: 'b' }] });
   check('edit_many на отсутствующий файл → ENOENT', m11.ok === false && m11.error.code === 'ENOENT', JSON.stringify(m11).slice(0, 240));
 
+  // Алиасы ключей: модель по привычке от edit_file пишет { old_string, new_string }.
+  // Раньше это давало невнятное «old не может быть пустой» — теперь принимаем оба набора.
+  const m12 = await tool('edit_many', {
+    path: 'many.txt',
+    edits: [{ old_string: 'beta = 2', new_string: 'beta = 20' }],
+  });
+  check('edit_many принимает old_string/new_string', m12.ok === true && m12.result.applied === 1, JSON.stringify(m12).slice(0, 320));
+  const m12r = await tool('read_file', { path: 'many.txt' });
+  check('edit_many с алиасами — результат в файле', m12r.result.content === 'alpha = 10\nbeta = 20\ngamma = 30\n', JSON.stringify(m12r.result.content));
+
+  const m13 = await tool('edit_many', { path: 'many.txt', edits: [{ old: '', old_string: '', new: 'x' }] });
+  check('edit_many с пустыми old и old_string → EARGS', m13.ok === false && m13.error.code === 'EARGS', JSON.stringify(m13).slice(0, 240));
+
+  const m14 = await tool('edit_many', { path: 'many.txt', edits: [{ replace_all: true }] });
+  check('edit_many без old и old_string → EARGS с подсказкой', m14.ok === false && m14.error.code === 'EARGS' && /old_string/.test(m14.error.message), JSON.stringify(m14).slice(0, 240));
+
   const ls = await tool('list_dir', { path: '.' });
   check('list_dir видит notes.md', ls.ok === true && ls.result.items.some((i) => i.name === 'notes.md'));
 
@@ -862,6 +878,11 @@ try {
   check('read_file auto распознаёт cp1251', encAuto.ok === true && encAuto.result.content === 'Привет' && /1251/.test(encAuto.result.encoding), JSON.stringify(encAuto).slice(0, 260));
   const encUtf = await tool('read_file', { path: 'diffA.txt' });
   check('read_file обычного текста → utf-8', encUtf.ok === true && encUtf.result.encoding === 'utf-8' && encUtf.result.content.includes('one'), JSON.stringify(encUtf).slice(0, 240));
+  check('read_file отдаёт detectedEncoding', encUtf.ok === true && encUtf.result.detectedEncoding === 'utf-8', JSON.stringify(encUtf).slice(0, 200));
+
+  // Дефолт без encoding тоже должен распознавать cp1251 — раньше это требовало "auto".
+  const encDefault = await tool('read_file', { path: 'cp1251.txt' });
+  check('read_file без encoding распознаёт cp1251', encDefault.ok === true && encDefault.result.content === 'Привет', JSON.stringify(encDefault).slice(0, 260));
 
   // edit_many: dry_run
   await tool('write_file', { path: 'dry.txt', content: 'aaa\nbbb\n' });

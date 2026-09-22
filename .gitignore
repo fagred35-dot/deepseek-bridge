@@ -29,6 +29,9 @@ bridge/dist/*.cjs
 #   node extension/render-instruction.mjs
 INSTRUCTION.preview.md
 
+# --- Временные файлы ---
+.tmp/
+
 # --- Разное ---
 node_modules/
 *.log

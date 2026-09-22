@@ -3,6 +3,12 @@
   right: 16px;
   bottom: 16px;
   width: 336px;
+  /* host пропускает клики (pointer-events:none) — панель их снова ловит */
+  pointer-events: auto;
+  /* Панель не должна вылезать за экран на низких окнах: тело прокручивается */
+  max-height: calc(100vh - 32px);
+  display: flex;
+  flex-direction: column;
   z-index: 2147483646;
   background: #1e1e2e;
   color: #cdd6f4;
@@ -63,7 +69,7 @@
   cursor: pointer;
   line-height: 1;
 }
-#dsbridge-panel .dsb-body { padding: 10px 12px; }
+#dsbridge-panel .dsb-body { padding: 10px 12px; overflow: auto; }
 #dsbridge-panel.dsb-collapsed .dsb-body { display: none; }
 #dsbridge-panel .dsb-row {
   display: flex;
