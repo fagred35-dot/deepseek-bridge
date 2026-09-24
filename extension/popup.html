@@ -55,6 +55,12 @@
   <label for="token">Токен моста</label>
   <input id="token" type="text" placeholder="вставьте токен из UI моста" spellcheck="false">
 
+  <label for="persona">Персонаж (необязательно)</label>
+  <select id="persona" style="width:100%;box-sizing:border-box;background:#181825;color:#cdd6f4;border:1px solid #313244;border-radius:8px;padding:8px;font-size:12px">
+    <option value="">— не выбран —</option>
+  </select>
+  <div class="hint">Текст персонажа добавится к системному промпту ниже. Список берётся с моста.</div>
+
   <label style="display:flex;align-items:center;gap:8px;color:#cdd6f4;font-size:12px;margin-top:14px">
     <input id="promptOn" type="checkbox" style="width:auto;margin:0">
     Скрытый системный промпт

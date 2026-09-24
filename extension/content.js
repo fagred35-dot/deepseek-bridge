@@ -1979,19 +1979,43 @@
   // content script живёт в isolated world и chrome.storage ему доступен;
   // перехватчик запросов — в MAIN world, где storage нет. Мост между ними —
   // CustomEvent: страница видит его, но ничего не делает (имя с префиксом).
-  function pushSystemPrompt() {
+  // Текст выбранного персонажа тянем с моста: он хранится в ~/.dsbridge/presets.json,
+  // а не в storage расширения. Кэш — чтобы не дёргать мост на каждый запрос чата.
+  let personaCache = { name: "", text: "", at: 0 };
+  const PERSONA_TTL_MS = 30000;
+
+  async function personaText(name) {
+    if (!name) return "";
+    const now = Date.now();
+    if (personaCache.name === name && now - personaCache.at < PERSONA_TTL_MS) return personaCache.text;
     try {
-      chrome.storage.local.get("systemPrompt").then((bag) => {
-        const sp = bag && bag.systemPrompt;
-        window.dispatchEvent(
-          new CustomEvent("__dsbridge_prompt", {
-            detail: {
-              enabled: !!(sp && sp.enabled === true),
-              prompt: sp && typeof sp.text === "string" ? sp.text : "",
-            },
-          }),
-        );
-      });
+      const res = await chrome.runtime.sendMessage({ type: "tool", tool: "persona_get", args: { name } });
+      const text = res && res.ok && res.result && typeof res.result.text === "string" ? res.result.text : "";
+      personaCache = { name, text, at: now };
+      return text;
+    } catch {
+      // мост недоступен — обойдёмся без персонажа
+      return "";
+    }
+  }
+
+  async function pushSystemPrompt() {
+    try {
+      const bag = await chrome.storage.local.get(["systemPrompt", "personaName"]);
+      const sp = bag && bag.systemPrompt;
+      const baseText = sp && typeof sp.text === "string" ? sp.text : "";
+      const personaName = bag && typeof bag.personaName === "string" ? bag.personaName : "";
+      const pText = await personaText(personaName);
+      // Порядок важен: сначала персонаж (кто ты), потом системный промпт (как работать).
+      const combined = [pText, baseText].filter((s) => s && s.trim()).join("\n\n");
+      window.dispatchEvent(
+        new CustomEvent("__dsbridge_prompt", {
+          detail: {
+            enabled: !!(sp && sp.enabled === true) && combined.length > 0,
+            prompt: combined,
+          },
+        }),
+      );
     } catch {
       // storage недоступен — промпт просто не применится
     }

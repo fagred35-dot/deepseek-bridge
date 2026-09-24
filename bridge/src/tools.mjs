@@ -8,6 +8,18 @@ import { DATA_DIR } from './config.mjs';
 import { screenshotScriptPath } from './assets.mjs';
 import { runShell, runProcess, spawnBackground, killTree, decodeClixml } from './shell.mjs';
 import { httpRequest, downloadTo, MAX_BODY } from './net.mjs';
+import {
+  PRESETS_PATH,
+  personaList,
+  personaGet,
+  personaSet,
+  personaDelete,
+  skillList,
+  skillGet,
+  skillSet,
+  skillDelete,
+  skillRender,
+} from './presets.mjs';
 import { screenshotPage, findBrowser } from './browser.mjs';
 
 const SHELLS = new Set(['powershell', 'pwsh', 'cmd', 'bash', 'sh']);
@@ -689,6 +701,60 @@ export const TOOLS = [
     parameters: { key: 'строка, точный ключ', pattern: 'строка, подстрока или regex по ключу', limit: 'число, по умолчанию 50' },
   },
   { name: 'forget', description: 'Удалить запись из памяти модели', parameters: { key: 'строка', all: 'boolean, стереть всё (по умолчанию false)' } },
+  {
+    name: 'persona_list',
+    description: 'Список сохранённых персонажей (system-промптов с именем)',
+    parameters: {},
+  },
+  {
+    name: 'persona_get',
+    description: 'Прочитать персонажа: текст промпта и описание',
+    parameters: { name: 'строка' },
+  },
+  {
+    name: 'persona_set',
+    description: 'Сохранить персонажа (создать или перезаписать)',
+    parameters: { name: 'строка, до 64 символов', text: 'строка, system-промпт', description: 'строка, краткое описание (необязательно)' },
+  },
+  {
+    name: 'persona_delete',
+    description: 'Удалить персонажа',
+    parameters: { name: 'строка' },
+  },
+  {
+    name: 'skill_list',
+    description:
+      'Список сохранённых скиллов — шаблонов повторяемых задач. Отдаются по MCP ' +
+      'как prompts, поэтому видны в Claude Desktop и Cursor как слэш-команды',
+    parameters: {},
+  },
+  {
+    name: 'skill_get',
+    description: 'Прочитать скилл: текст шаблона и объявленные аргументы',
+    parameters: { name: 'строка' },
+  },
+  {
+    name: 'skill_set',
+    description:
+      'Сохранить скилл. В тексте можно использовать плейсхолдеры {{имя}} — они ' +
+      'подставляются через skill_render',
+    parameters: {
+      name: 'строка, до 64 символов',
+      text: 'строка, шаблон задачи (может содержать {{аргументы}})',
+      description: 'строка, что делает скилл (необязательно)',
+      arguments: 'массив [{ name, description, required }] — объявление аргументов (необязательно)',
+    },
+  },
+  {
+    name: 'skill_delete',
+    description: 'Удалить скилл',
+    parameters: { name: 'строка' },
+  },
+  {
+    name: 'skill_render',
+    description: 'Подставить значения в плейсхолдеры {{имя}} шаблона и вернуть готовый текст',
+    parameters: { name: 'строка, имя скилла', values: 'объект, значения аргументов, например {"компонент":"Button"}' },
+  },
   {
     name: 'usage_stats',
     description: 'Метрики вызовов инструментов: частота, ошибки, среднее и максимальное время',
@@ -1998,6 +2064,47 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
       delete mem[key];
       writeMemoryFile(mem);
       return { key, removed: true, keys: Object.keys(mem).length };
+    }
+
+    case 'persona_list': {
+      return { personas: personaList(), file: PRESETS_PATH.split(path.sep).join('/') };
+    }
+
+    case 'persona_get': {
+      return personaGet(args.name);
+    }
+
+    case 'persona_set': {
+      return personaSet({ name: args.name, text: args.text, description: args.description });
+    }
+
+    case 'persona_delete': {
+      return personaDelete(args.name);
+    }
+
+    case 'skill_list': {
+      return { skills: skillList(), file: PRESETS_PATH.split(path.sep).join('/') };
+    }
+
+    case 'skill_get': {
+      return skillGet(args.name);
+    }
+
+    case 'skill_set': {
+      return skillSet({
+        name: args.name,
+        text: args.text,
+        description: args.description,
+        arguments: args.arguments,
+      });
+    }
+
+    case 'skill_delete': {
+      return skillDelete(args.name);
+    }
+
+    case 'skill_render': {
+      return skillRender(args.name, args.values && typeof args.values === 'object' ? args.values : {});
     }
 
     case 'usage_stats': {

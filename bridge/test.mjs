@@ -139,7 +139,7 @@ try {
 
   const health = await req('/api/health');
   check('health отвечает ok', health.json && health.json.ok === true);
-  check('health сообщает 41 инструмент', health.json && health.json.tools.length === 41, String(health.json && health.json.tools.length));
+  check('health сообщает 50 инструментов', health.json && health.json.tools.length === 50, String(health.json && health.json.tools.length));
   check('health сообщает флаг allowCommands', health.json && health.json.allowCommands === true);
 
   const noToken = await req('/api/tools');
@@ -147,7 +147,7 @@ try {
   const badToken = await req('/api/tools', { headers: { 'X-Bridge-Token': 'nope' } });
   check('с неверным токеном — 401', badToken.status === 401, String(badToken.status));
   const tools = await req('/api/tools', { headers: AUTH });
-  check('список инструментов по токену', tools.json && tools.json.ok === true && tools.json.tools.length === 41);
+  check('список инструментов по токену', tools.json && tools.json.ok === true && tools.json.tools.length === 50);
   check('health сообщает флаг allowNetwork (по умолчанию выключен)', health.json && health.json.allowNetwork === false);
 
   const ui = await req('/');
@@ -1040,6 +1040,46 @@ try {
   check('process_logs без процесса → ENOPROC', logsNo.ok === false && logsNo.error.code === 'ENOPROC', JSON.stringify(logsNo).slice(0, 200));
   await tool('kill_process', { name: 'logger' });
 
+  // ---- персонажи и скиллы ----
+  const pres0 = await tool('persona_list', {});
+  check('persona_list пуст на старте', pres0.ok === true && pres0.result.personas.length === 0, JSON.stringify(pres0).slice(0, 200));
+
+  const presSet = await tool('persona_set', { name: 'Тест-персонаж', text: 'Ты тестовый персонаж.', description: 'для теста' });
+  check('persona_set сохраняет', presSet.ok === true && presSet.result.stored === true, JSON.stringify(presSet).slice(0, 200));
+
+  const presGet = await tool('persona_get', { name: 'Тест-персонаж' });
+  check('persona_get отдаёт текст', presGet.ok === true && presGet.result.text.includes('тестовый персонаж'));
+
+  const presBad = await tool('persona_set', { name: 'плохое/имя', text: 'x' });
+  check('persona_set: имя с / → EARGS', presBad.ok === false && presBad.error.code === 'EARGS');
+
+  const skillSet = await tool('skill_set', {
+    name: 'test-skill',
+    text: 'Сделай {{что}} в {{где}}.',
+    description: 'тестовый скилл',
+    arguments: [{ name: 'что', required: true }, { name: 'где', required: true }],
+  });
+  check('skill_set сохраняет с аргументами', skillSet.ok === true && skillSet.result.arguments === 2, JSON.stringify(skillSet).slice(0, 200));
+
+  const skillRender = await tool('skill_render', { name: 'test-skill', values: { что: 'кнопку', где: 'index.html' } });
+  check('skill_render подставляет значения', skillRender.ok === true && skillRender.result.text === 'Сделай кнопку в index.html.', JSON.stringify(skillRender).slice(0, 200));
+
+  // кириллица в плейсхолдерах — отдельная проверка: \w её не ловит
+  const skillCyr = await tool('skill_render', { name: 'test-skill', values: { что: 'форму' } });
+  check('skill_render: незаполненный плейсхолдер остаётся', skillCyr.ok === true && skillCyr.result.text.includes('{{где}}'), skillCyr.result && skillCyr.result.text);
+
+  const mcpPrompts = await mcp('prompts/list', {}, 20);
+  check('MCP prompts/list отдаёт скиллы', mcpPrompts.json && mcpPrompts.json.result.prompts.some((p) => p.name === 'test-skill'), JSON.stringify(mcpPrompts.json).slice(0, 250));
+
+  const mcpPromptGet = await mcp('prompts/get', { name: 'test-skill', arguments: { что: 'карточку', где: 'app.js' } }, 21);
+  check('MCP prompts/get подставляет аргументы', mcpPromptGet.json && mcpPromptGet.json.result.messages[0].content.text.includes('карточку'), JSON.stringify(mcpPromptGet.json).slice(0, 250));
+
+  await tool('persona_delete', { name: 'Тест-персонаж' });
+  await tool('skill_delete', { name: 'test-skill' });
+  const presAfter = await tool('persona_list', {});
+  const skillAfter = await tool('skill_list', {});
+  check('после удаления списки пусты', presAfter.result.personas.length === 0 && skillAfter.result.skills.length === 0);
+
   // ---- python ----
   const py1 = await tool('python', { code: 'print("привет из python")' });
   check('python: простой скрипт, stdout и exitCode 0', py1.ok === true && py1.result.exitCode === 0 && py1.result.stdout.includes('привет из python'), JSON.stringify(py1).slice(0, 260));
@@ -1075,7 +1115,7 @@ try {
   );
 
   const mcpList = await mcp('tools/list', {});
-  check('MCP tools/list отдаёт 41 инструмент', mcpList.json && mcpList.json.result.tools.length === 41, String(mcpList.json && mcpList.json.result.tools.length));
+  check('MCP tools/list отдаёт 50 инструментов', mcpList.json && mcpList.json.result.tools.length === 50, String(mcpList.json && mcpList.json.result.tools.length));
   const mcpNames = mcpList.json.result.tools.map((t) => t.name);
   check('MCP tools/list включает read_file', mcpNames.includes('read_file'));
   const mcpListDir = mcpList.json.result.tools.find((t) => t.name === 'list_dir');

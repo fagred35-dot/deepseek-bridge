@@ -5,6 +5,7 @@ const statusEl = document.getElementById("status");
 const tokenInput = document.getElementById("token");
 const promptOn = document.getElementById("promptOn");
 const promptBox = document.getElementById("prompt");
+const personaSel = document.getElementById("persona");
 const wsEl = document.getElementById("ws");
 const pathInput = document.getElementById("path");
 const warnEl = document.getElementById("warn");
@@ -57,11 +58,34 @@ async function check() {
   }
 }
 
+// Список персонажей тянем с моста. Не удалось — оставляем только «не выбран»:
+// панель не должна ломаться из-за недоступного моста.
+async function loadPersonas(token) {
+  try {
+    const res = await fetch(BRIDGE + "/api/tool", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Bridge-Token": token },
+      body: JSON.stringify({ tool: "persona_list", args: {} }),
+    });
+    const j = await res.json();
+    const list = j && j.ok && j.result && Array.isArray(j.result.personas) ? j.result.personas : [];
+    for (const p of list) {
+      const opt = document.createElement("option");
+      opt.value = p.name;
+      opt.textContent = p.description ? p.name + " — " + p.description : p.name;
+      personaSel.append(opt);
+    }
+  } catch {
+    // мост недоступен — просто нет списка
+  }
+}
+
 document.getElementById("save").addEventListener("click", async () => {
   const token = tokenInput.value.trim();
   await chrome.storage.local.set({
     token,
     systemPrompt: { enabled: promptOn.checked, text: promptBox.value },
+    personaName: personaSel.value || "",
   });
   await check();
 });
@@ -120,13 +144,20 @@ document.getElementById("openWs").addEventListener("click", async () => {
 });
 
 (async () => {
-  const { token, lastPicked, systemPrompt } = await chrome.storage.local.get(["token", "lastPicked", "systemPrompt"]);
+  const { token, lastPicked, systemPrompt, personaName } = await chrome.storage.local.get([
+    "token",
+    "lastPicked",
+    "systemPrompt",
+    "personaName",
+  ]);
   if (token) tokenInput.value = token;
   if (lastPicked) pathInput.value = lastPicked;
   if (systemPrompt && typeof systemPrompt === "object") {
     promptOn.checked = systemPrompt.enabled === true;
     promptBox.value = typeof systemPrompt.text === "string" ? systemPrompt.text : "";
   }
+  await loadPersonas(token || "");
+  if (personaName) personaSel.value = personaName;
   await check();
   if (lastPicked) await chrome.storage.local.remove("lastPicked");
 })();

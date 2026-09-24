@@ -13,6 +13,7 @@
 // отдельная проверка Origin — защита от DNS rebinding, как требует спецификация.
 
 import { TOOLS, runTool } from './tools.mjs';
+import { skillList, skillGet, skillRender } from './presets.mjs';
 import { log } from './logger.mjs';
 
 // Версия протокола, которую объявляем при initialize. 2025-06-18 — стабильная
@@ -139,7 +140,7 @@ export async function handleRpc(cfg, msg, mcpClients = null) {
       case 'initialize': {
         return rpcResult(id, {
           protocolVersion: MCP_PROTOCOL_VERSION,
-          capabilities: { tools: { listChanged: false } },
+          capabilities: { tools: { listChanged: false }, prompts: { listChanged: false } },
           serverInfo: { name: SERVER_NAME, version: SERVER_VERSION },
           instructions:
             'Мост к локальной файловой системе. Инструменты те же, что и в dsbridge: ' +
@@ -162,6 +163,38 @@ export async function handleRpc(cfg, msg, mcpClients = null) {
         const onlySet = params && params._meta && params._meta.toolSet;
         const tools = onlySet ? all.filter((t) => t._meta.toolSet === onlySet) : all;
         return rpcResult(id, { tools });
+      }
+
+      // Скиллы отдаются как MCP prompts: Claude Desktop, Cursor и прочие клиенты
+      // увидят их как слэш-команды. Пользователь один раз описал workflow — и он
+      // воспроизводится, а модели не нужно угадывать последовательность шагов.
+      case 'prompts/list': {
+        const prompts = skillList().map((s) => ({
+          name: s.name,
+          description: s.description || '',
+          arguments: s.arguments,
+        }));
+        return rpcResult(id, { prompts });
+      }
+
+      case 'prompts/get': {
+        const name = params && params.name;
+        if (!name) return rpcError(id, -32602, 'Не указано имя промпта');
+        try {
+          const s = skillGet(name);
+          // Если у скилла объявлены аргументы, а значения не переданы — рендер
+          // оставит плейсхолдеры как есть. Клиент сам решит, спрашивать ли их.
+          const rendered = skillRender(name, (params && params.arguments) || {});
+          const messages = [
+            {
+              role: 'user',
+              content: { type: 'text', text: rendered.text },
+            },
+          ];
+          return rpcResult(id, { description: s.description || '', messages });
+        } catch (e) {
+          return rpcError(id, -32602, e.message);
+        }
       }
 
       case 'tools/call': {
