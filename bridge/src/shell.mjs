@@ -201,7 +201,7 @@ export function runShell({ shell = 'powershell', command, cwd, timeoutMs = 30000
 // Запуск без оболочки: argv-массив передаётся ядру как есть. Нужен там, где
 // аргументы содержат произвольный текст (сообщение коммита) — в шелле их
 // пришлось бы экранировать, и любая ошибка экранирования стала бы инъекцией.
-export function runProcess({ file, args = [], cwd, timeoutMs = 30000, env }) {
+export function runProcess({ file, args = [], cwd, timeoutMs = 30000, env, stdin }) {
   return new Promise((resolve) => {
     const started = Date.now();
     const ms = Math.min(Math.max(Number(timeoutMs) || 30000, MIN_TIMEOUT), MAX_TIMEOUT);
@@ -220,6 +220,17 @@ export function runProcess({ file, args = [], cwd, timeoutMs = 30000, env }) {
     } catch (e) {
       resolve({ error: 'не удалось запустить ' + file + ': ' + e.message });
       return;
+    }
+
+    // stdin: если передан, пишем и закрываем поток. Без этого скрипты, читающие
+    // input(), висели бы до таймаута.
+    if (stdin !== undefined && stdin !== null) {
+      try {
+        child.stdin.write(String(stdin));
+        child.stdin.end();
+      } catch {
+        // поток уже закрыт — не наша проблема
+      }
     }
 
     let stdout = '';

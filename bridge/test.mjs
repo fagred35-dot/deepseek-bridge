@@ -139,7 +139,7 @@ try {
 
   const health = await req('/api/health');
   check('health отвечает ok', health.json && health.json.ok === true);
-  check('health сообщает 40 инструментов', health.json && health.json.tools.length === 40, String(health.json && health.json.tools.length));
+  check('health сообщает 41 инструмент', health.json && health.json.tools.length === 41, String(health.json && health.json.tools.length));
   check('health сообщает флаг allowCommands', health.json && health.json.allowCommands === true);
 
   const noToken = await req('/api/tools');
@@ -147,7 +147,7 @@ try {
   const badToken = await req('/api/tools', { headers: { 'X-Bridge-Token': 'nope' } });
   check('с неверным токеном — 401', badToken.status === 401, String(badToken.status));
   const tools = await req('/api/tools', { headers: AUTH });
-  check('список инструментов по токену', tools.json && tools.json.ok === true && tools.json.tools.length === 40);
+  check('список инструментов по токену', tools.json && tools.json.ok === true && tools.json.tools.length === 41);
   check('health сообщает флаг allowNetwork (по умолчанию выключен)', health.json && health.json.allowNetwork === false);
 
   const ui = await req('/');
@@ -1040,6 +1040,29 @@ try {
   check('process_logs без процесса → ENOPROC', logsNo.ok === false && logsNo.error.code === 'ENOPROC', JSON.stringify(logsNo).slice(0, 200));
   await tool('kill_process', { name: 'logger' });
 
+  // ---- python ----
+  const py1 = await tool('python', { code: 'print("привет из python")' });
+  check('python: простой скрипт, stdout и exitCode 0', py1.ok === true && py1.result.exitCode === 0 && py1.result.stdout.includes('привет из python'), JSON.stringify(py1).slice(0, 260));
+  check('python: путь к интерпретатору в ответе', py1.ok === true && /python/i.test(py1.result.python || ''), py1.result && py1.result.python);
+
+  const py2 = await tool('python', { code: 'import sys; sys.stderr.write("ош"); sys.exit(3)' });
+  check('python: stderr и ненулевой exitCode', py2.result.exitCode === 3 && py2.result.stderr.includes('ош'), JSON.stringify(py2).slice(0, 200));
+
+  const py3 = await tool('python', { code: 'import sys; print(sys.argv[1:])', args: ['a', 'b'] });
+  check('python: аргументы через sys.argv', py3.result.stdout.includes("['a', 'b']"), py3.result.stdout);
+
+  const py4 = await tool('python', { code: 'print(input().upper())', stdin: 'тихо' });
+  check('python: stdin подаётся', py4.result.stdout.includes('ТИХО'), py4.result.stdout);
+
+  const py5 = await tool('python', { code: 'open("py-out.txt","w").write("ok"); print("done")' });
+  check('python: пишет файл в рабочей папке', py5.result.exitCode === 0 && fs.existsSync(path.join(WORKSPACE, 'py-out.txt')));
+
+  const py6 = await tool('python', { code: 'raise ValueError("бум")' });
+  check('python: исключение → stderr с трассировкой', py6.ok === true && py6.result.exitCode !== 0 && py6.result.stderr.includes('ValueError'), JSON.stringify(py6).slice(0, 200));
+
+  const py7 = await tool('python', { code: '   ' });
+  check('python: пустой code → EARGS', py7.ok === false && py7.error.code === 'EARGS');
+
   // ---- MCP (Streamable HTTP) ----
   const mcpNoToken = await req('/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }) });
   check('MCP без токена → 401', mcpNoToken.status === 401, String(mcpNoToken.status));
@@ -1052,7 +1075,7 @@ try {
   );
 
   const mcpList = await mcp('tools/list', {});
-  check('MCP tools/list отдаёт 40 инструментов', mcpList.json && mcpList.json.result.tools.length === 40, String(mcpList.json && mcpList.json.result.tools.length));
+  check('MCP tools/list отдаёт 41 инструмент', mcpList.json && mcpList.json.result.tools.length === 41, String(mcpList.json && mcpList.json.result.tools.length));
   const mcpNames = mcpList.json.result.tools.map((t) => t.name);
   check('MCP tools/list включает read_file', mcpNames.includes('read_file'));
   const mcpListDir = mcpList.json.result.tools.find((t) => t.name === 'list_dir');

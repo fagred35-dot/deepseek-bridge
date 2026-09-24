@@ -717,6 +717,21 @@ export const TOOLS = [
     },
   },
   {
+    name: 'python',
+    description:
+      'Выполнить Python-код (нативный python из PATH). Код передаётся как есть — ' +
+      'без shell-экранирования, кавычек и пайпов, поэтому это надёжнее run_command ' +
+      'для скриптов. Рабочая папка — cwd, вывод stdout/stderr и код возврата. ' +
+      'Нужен флаг «Выполнение команд».',
+    parameters: {
+      code: 'строка, Python-код (можно многострочный)',
+      cwd: 'строка, рабочий каталог, по умолчанию \".\"',
+      timeoutMs: 'число, мс (по умолчанию 60000)',
+      args: 'массив строк — аргументы для скрипта (sys.argv[1:])',
+      stdin: 'строка, что подать на вход скрипту',
+    },
+  },
+  {
     name: 'run_command',
     description:
       'Выполнить команду в PowerShell / cmd / bash (рабочая папка как cwd). ' +
@@ -1544,6 +1559,36 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
       if (res.exitCode !== 0) throw toolError('ESHOT', (res.stderr || 'скриншот не удался').trim().slice(0, 300));
       const st = await fsp.stat(abs);
       return { path: rel(root, abs), bytes: st.size, mode: args.window ? 'window' : 'screen', window: args.window || null };
+    }
+
+    case 'python': {
+      if (!cfg.allowCommands) throw toolError('EDISABLED', 'Выполнение команд выключено в настройках моста');
+      const code = String(args.code || '');
+      if (!code.trim()) throw toolError('EARGS', 'Параметр code обязателен');
+      const cwd = jail(args.cwd || '.');
+      const candidates = process.platform === 'win32' ? ['python', 'py', 'python3'] : ['python3', 'python'];
+      let exe = null;
+      for (const name of candidates) {
+        const found = await findToolPaths(name);
+        if (found.found.length) {
+          exe = found.found[0].path;
+          break;
+        }
+      }
+      if (!exe) throw toolError('ENOPY', 'Python не найден. Установи Python или используй run_command.');
+      const scriptArgs = Array.isArray(args.args) ? args.args.map((a) => String(a)) : [];
+      // PYTHONUTF8/PYTHONIOENCODING: без них Python на Windows пишет в cp1251/cp866,
+      // а мост читает stdout как UTF-8 — кириллица превращается в мусор.
+      const out = await runProcess({
+        file: exe,
+        args: ['-c', code, ...scriptArgs],
+        cwd,
+        timeoutMs: args.timeoutMs,
+        stdin: args.stdin,
+        env: { PYTHONUTF8: '1', PYTHONIOENCODING: 'utf-8' },
+      });
+      if (out.error) throw toolError('EPYTHON', out.error);
+      return { ...out, cwd: rel(root, cwd), python: exe.split(path.sep).join('/') };
     }
 
     case 'run_command': {
