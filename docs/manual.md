@@ -15,28 +15,35 @@
 ├─ CHANGES.md               журнал изменений (git в проекте нет)
 ├─ bridge/                  локальный мост (Node, без зависимостей)
 │  ├─ src/server.mjs        HTTP-сервер, роутинг, SSE, отдача файлов
-│  ├─ src/tools.mjs         40 инструментов
+│  ├─ src/tools.mjs         50 инструментов
 │  ├─ src/shell.mjs         запуск PowerShell / cmd / bash, argv-запуск, фоновые процессы
 │  ├─ src/net.mjs           HTTP-запросы и скачивание (за флагом allowNetwork)
 │  ├─ src/browser.mjs       headless-скриншот страницы через Chrome / Edge
 │  ├─ src/security.mjs      path jail, сравнение токена
 │  ├─ src/config.mjs        конфиг в ~/.dsbridge/config.json
 │  ├─ src/logger.mjs        audit-log + поток событий
+│  ├─ src/mcp.mjs           MCP-сервер: JSON-RPC 2.0, tools/* и prompts/*
+│  ├─ src/mcp-client.mjs    MCP-клиент: подключение внешних серверов (stdio/http)
+│  ├─ src/presets.mjs       персонажи и скиллы (~/.dsbridge/presets.json)
 │  ├─ src/assets.mjs        единственное место, знающее о файлах проекта: html и ps1
 │  │                        (в exe сборка подменяет этот модуль на вшитые строки)
 │  ├─ scripts/screenshot.ps1  список окон и скриншоты (P/Invoke GDI)
 │  ├─ public/index.html     UI-окно (папка, статус, инструменты, лог)
-│  ├─ test.mjs              smoke-тесты (197 проверок)
+│  ├─ test.mjs              smoke-тесты (258 проверок)
 │  └─ build.mjs             сборка одного exe: бандлер ESM→CJS, Node SEA, postject,
 │                           самопроверка запуском
 └─ extension/               MV3-расширение для браузера
    ├─ manifest.json
    ├─ background.js         доступ к мосту (обходит CORS), blob → data:URL
-   ├─ content.js            панель в чате, парсинг вызовов, карточки, очередь,
-   │                        прикрепление картинок, шлюз отправки
+   ├─ content.js            панель в чате, парсинг вызовов (JSON и XML), карточки,
+   │                        очередь, прикрепление картинок, шлюз отправки,
+   │                        трансляция системного промпта и персонажа в MAIN world
+   ├─ page-inject.js        MAIN world: перехват fetch/XHR, скрытый системный промпт
    ├─ content.css
-   ├─ popup.html / popup.js токен, статус, смена рабочей папки
-   └─ test.mjs              тесты чистых функций content.js (49 проверок)
+   ├─ popup.html / popup.js токен, статус, рабочая папка, персонаж, системный промпт
+   ├─ test.mjs              тесты content.js (114 проверок)
+   ├─ test-inject.mjs       тесты перехватчика промпта (22)
+   └─ test-xml.mjs          тесты XML-формата вызовов (34)
 ```
 
 ## Запуск моста
@@ -525,6 +532,83 @@ DeepSeek отвечает «Слишком частые сообщения. По
 Если мост не ответил (не запущен, порт занят), инструкция всё равно вставляется — но со
 списком **только из имён** инструментов и пометкой, что подробности недоступны.
 
+## MCP, персонажи и XML
+
+### MCP — мост как сервер и как клиент
+
+Мост говорит на Model Context Protocol с двух сторон.
+
+**Как сервер.** Эндпоинт `POST http://127.0.0.1:8443/mcp` (Streamable HTTP, JSON-RPC 2.0)
+отдаёт те же инструменты: `initialize`, `tools/list`, `tools/call`, `ping`, а также
+`prompts/list` и `prompts/get`. Авторизация — токен моста в заголовке
+`Authorization: Bearer <token>` (или `X-Bridge-Token`, или `?token=`). Origin проверяется.
+
+Подключение в Claude Desktop или Cursor:
+
+```json
+{ "mcpServers": { "dsbridge": {
+  "url": "http://127.0.0.1:8443/mcp",
+  "headers": { "Authorization": "Bearer ВАШ_ТОКЕН" } } } }
+```
+
+**Как клиент.** В `~/.dsbridge/config.json` есть поле `mcpServers` — мост подключит
+внешние MCP-серверы, а их инструменты появятся в общем списке под именем
+`<server>__<tool>`. Транспорты: `stdio` (локальный процесс) и `http` (удалённый сервер).
+Статус — `GET /api/mcp/status`.
+
+```json
+{ "mcpServers": [
+  { "name": "computer", "transport": "stdio", "command": "npx", "args": ["-y", "computer-use-mcp"] }
+] }
+```
+
+**Tool Sets.** У каждого инструмента в `tools/list` есть `_meta.toolSet` (`files`, `shell`,
+`git`, `screen`, `memory`, `meta`, `net`, `other`). `tools/list` умеет фильтровать по набору.
+
+### Персонажи и скиллы
+
+**Персонаж** — сохранённый system-промпт с именем. Выбирается в popup расширения и
+подмешивается к скрытому системному промпту: сначала персонаж (кто ты), потом промпт
+(как работать). Хранится на мосте в `~/.dsbridge/presets.json`.
+
+**Скилл** — шаблон повторяемой задачи с плейсхолдерами `{{имя}}`:
+
+```
+Создай компонент {{компонент}} в файле {{файл}}.
+```
+
+Скиллы отдаются по MCP как prompts — Claude Desktop и Cursor видят их как слэш-команды.
+Управление: инструменты `persona_*` и `skill_*`, либо файл `presets.json` напрямую.
+
+### XML-теги вместо JSON
+
+Любой вызов можно записать не JSON, а тегами — это устойчивее к опечаткам модели:
+
+```dsbridge
+<dsbridge-tool name="edit_file">
+  <path>src/app.js</path>
+  <old_string>было</old_string>
+  <new_string>стало</new_string>
+</dsbridge-tool>
+```
+
+Ссылка на файл: `<dsbridge-file path="report.md" label="Отчёт"/>`,
+картинка: `<dsbridge-image src="shot.png" alt="Скриншот"/>`. Оба формата дают одинаковый
+результат — можно смешивать в одном ответе.
+
+### Скрытый системный промпт
+
+В popup расширения есть чекбокс и textarea. Включённый промпт уходит модели в каждом
+запросе, но не появляется в видимом чате: content script в мире MAIN перехватывает
+`fetch`/`XMLHttpRequest` и добавляет system-сообщение. Поддержаны форматы `system`
+(Claude), `system_prompt`/`systemPrompt`, `messages[]`, `prompt`. Если формат запроса
+не распознан — запрос уходит без изменений.
+
+### Python
+
+Инструмент `python` выполняет код нативным интерпретатором: `{ code, cwd?, timeoutMs?, args?[], stdin? }`.
+Код передаётся как есть, без shell-экранирования, — это надёжнее `run_command` для скриптов.
+
 ## API моста
 
 | Метод | Путь | Auth | Назначение |
@@ -558,7 +642,7 @@ cd bridge
 node test.mjs
 ```
 
-197 проверок: все инструменты, path jail и `extraRoots`, авторизация, `/api/raw`,
+258 проверок: все инструменты, path jail и `extraRoots`, авторизация, `/api/raw`,
 `/api/open-file`, смена рабочей папки, SSE. Отдельные группы — `diff` / `diff_git`,
 `image_info`, `find_tool`, распознавание кодировки (`read_file` с `auto` на cp1251-байтах),
 `edit_many dry_run`, `list_dir recursive + glob`, `write_file createDirs:false`, раскрытие
@@ -590,7 +674,7 @@ cd extension
 node test.mjs
 ```
 
-49 проверок: разбор `data:URL` в `File` (включая побайтовое сравнение сигнатуры PNG),
+114 проверок: разбор `data:URL` в `File` (включая побайтовое сравнение сигнатуры PNG),
 выделение имени файла из пути, подсчёт срабатываний лимита и рост штрафной паузы, а также
 сборка списка инструментов для промта — сверка с настоящим реестром `TOOLS` из моста
 (ничего не потерялось, дубликатов нет, незнакомый инструмент уходит в «Прочее»).
