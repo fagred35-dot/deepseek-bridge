@@ -3,6 +3,8 @@ const BRIDGE = "http://127.0.0.1:8443";
 const dot = document.getElementById("dot");
 const statusEl = document.getElementById("status");
 const tokenInput = document.getElementById("token");
+const promptOn = document.getElementById("promptOn");
+const promptBox = document.getElementById("prompt");
 const wsEl = document.getElementById("ws");
 const pathInput = document.getElementById("path");
 const warnEl = document.getElementById("warn");
@@ -57,7 +59,10 @@ async function check() {
 
 document.getElementById("save").addEventListener("click", async () => {
   const token = tokenInput.value.trim();
-  await chrome.storage.local.set({ token });
+  await chrome.storage.local.set({
+    token,
+    systemPrompt: { enabled: promptOn.checked, text: promptBox.value },
+  });
   await check();
 });
 
@@ -115,9 +120,13 @@ document.getElementById("openWs").addEventListener("click", async () => {
 });
 
 (async () => {
-  const { token, lastPicked } = await chrome.storage.local.get(["token", "lastPicked"]);
+  const { token, lastPicked, systemPrompt } = await chrome.storage.local.get(["token", "lastPicked", "systemPrompt"]);
   if (token) tokenInput.value = token;
   if (lastPicked) pathInput.value = lastPicked;
+  if (systemPrompt && typeof systemPrompt === "object") {
+    promptOn.checked = systemPrompt.enabled === true;
+    promptBox.value = typeof systemPrompt.text === "string" ? systemPrompt.text : "";
+  }
   await check();
   if (lastPicked) await chrome.storage.local.remove("lastPicked");
 })();

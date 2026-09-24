@@ -1860,12 +1860,43 @@
     scan(false);
   }
 
+  // ---------- скрытый системный промпт ----------
+  // content script живёт в isolated world и chrome.storage ему доступен;
+  // перехватчик запросов — в MAIN world, где storage нет. Мост между ними —
+  // CustomEvent: страница видит его, но ничего не делает (имя с префиксом).
+  function pushSystemPrompt() {
+    try {
+      chrome.storage.local.get("systemPrompt").then((bag) => {
+        const sp = bag && bag.systemPrompt;
+        window.dispatchEvent(
+          new CustomEvent("__dsbridge_prompt", {
+            detail: {
+              enabled: !!(sp && sp.enabled === true),
+              prompt: sp && typeof sp.text === "string" ? sp.text : "",
+            },
+          }),
+        );
+      });
+    } catch {
+      // storage недоступен — промпт просто не применится
+    }
+  }
+
   buildPanel();
   // Позицию панели применяем после чтения настроек: до этого она ещё неизвестна.
   loadSettings().then(() => {
     applySettingsToPanel();
     applyPanelPos();
   });
+  // Промпт транслируем сразу и при каждом изменении настроек в popup.
+  pushSystemPrompt();
+  try {
+    chrome.storage.onChanged.addListener((changes, area) => {
+      if (area === "local" && changes.systemPrompt) pushSystemPrompt();
+    });
+  } catch {
+    // подписка не удалась — промпт применится при следующей перезагрузке страницы
+  }
   pollHealth();
   setInterval(pollHealth, 5000);
   setInterval(scanThrottled, 1000);

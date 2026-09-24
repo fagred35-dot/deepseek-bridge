@@ -9,6 +9,34 @@
 
 ---
 
+## 24.09.2026 — скрытый системный промпт (пункт 1 wishlist)
+
+**Задача.** Расширение добавляет кастомный system-промпт в каждый запрос к чату,
+не засоряя видимый чат. Пользователь редактирует его в настройках.
+
+**Как устроено.** Три части: `extension/page-inject.js` — content script в мире MAIN
+(`world: "MAIN"`, `run_at: document_start`), перехватывает `fetch` и `XMLHttpRequest`;
+`extension/content.js` транслирует настройку в MAIN world через
+`CustomEvent("__dsbridge_prompt")` и слушает `chrome.storage.onChanged`;
+popup получил чекбокс и textarea.
+
+**Эвристика.** Только POST к путям с `/api/`, `/backend-api/`, `/v1/` и словом
+chat/completion/conversation/message/prompt/generate/reply. Исключены health, settings,
+user, login, upload, feedback, billing, telemetry и прочее.
+
+**Форматы тела.** `system` (строка и массив блоков — Claude), `system_prompt` /
+`systemPrompt`, `messages[]`, `prompt`. Если system уже есть — **дополняется**.
+
+**Два бага, которые поймал тест до продакшена:** пропуск вставки при существующем
+system (чат всегда шлёт свой — промпт не работал бы нигде) и задвоение, когда в теле
+есть и `system`, и `messages`. Теперь берётся ровно один формат по приоритету.
+
+**Безопасность.** Любой сбой разбора — запрос уходит как был, тела не логируются,
+по умолчанию выключено.
+
+**Чем проверено.** `extension/test-inject.mjs` — **22 ok / 0 fail**.
+`extension/test.mjs` — **114 ok / 0 fail**. Версия расширения: 0.11.1 → 0.12.0.
+
 ## 24.09.2026 — MCP как второй транспорт: мост и сервер, и клиент
 
 **Задача (wishlist от Brick'а).** «Прикрути к мосту поддержку MCP, как локальных, так и
