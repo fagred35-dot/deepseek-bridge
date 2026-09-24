@@ -32,9 +32,10 @@ INSTRUCTION.preview.md
 # --- Временные файлы ---
 .tmp/
 
-# Вывод тестов, перенаправленный в файл (test-out.txt, ext-test.txt и т.п.)
+# Вывод тестов, перенаправленный в файл (test-out.txt, ext-test.txt, t.txt и т.п.)
 *-out.txt
 *-test.txt
+bridge/t.txt
 
 # --- Разное ---
 node_modules/
