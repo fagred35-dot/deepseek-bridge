@@ -417,14 +417,37 @@
     '{ "tool": "list_dir", "args": { "path": "." } }',
     "```",
     "",
+    "Если JSON ломается (запятые, кавычки) — тот же вызов можно записать тегами:",
+    "",
+    "```dsbridge",
+    '<dsbridge-tool name="edit_file">',
+    "  <path>src/app.js</path>",
+    "  <old_string>было</old_string>",
+    "  <new_string>стало</new_string>",
+    "</dsbridge-tool>",
+    "```",
+    "",
+    "Оба формата равнозначны. Правила: имя инструмента — в атрибуте name, каждый",
+    "аргумент — отдельный тег; числа, true/false и вложенный JSON распознаются сами.",
+    "",
     "Кроме dsbridge есть ещё два языка блоков — ссылка на файл и картинка:",
     "",
     "```dsbridge-file",
     '{ "path": "report.md", "label": "Отчёт" }',
     "```",
     "",
+    "Тегами то же самое:",
+    "",
+    "```dsbridge",
+    '<dsbridge-file path="report.md" label="Отчёт"/>',
+    "```",
+    "",
     "```dsbridge-image",
     '{ "src": "shot.png", "alt": "Скриншот" }',
+    "```",
+    "",
+    "```dsbridge",
+    '<dsbridge-image src="shot.png" alt="Скриншот"/>',
     "```",
     "",
     "Несколько блоков dsbridge подряд выполнятся по порядку; ответ уходит одним сообщением.",
@@ -1038,24 +1061,115 @@
     return null;
   }
 
+  // ---------- XML-теги как альтернатива JSON ----------
+  // JSON в dsbridge-блоке хрупкий: модели путают запятые и кавычки. Теги проще и
+  // для генерации, и для разбора. Формат:
+  //   <dsbridge-tool name="edit_file">
+  //     <path>src/app.js</path>
+  //     <old_string>было</old_string>
+  //     <new_string>стало</new_string>
+  //   </dsbridge-tool>
+  // Оба формата дают ОДИН и тот же spec — дальше по коду разницы нет.
+
+  // Раскрываем XML-сущности — модели могут экранировать угловые скобки и амперсанды.
+  function unescapeXml(s) {
+    return String(s)
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&quot;/g, '"')
+      .replace(/&#39;/g, "'")
+      .replace(/&amp;/g, "&");
+  }
+
+  // Значение из тега: если похоже на число/булево/JSON — приводим, иначе строка.
+  function coerceXmlValue(raw) {
+    const s = unescapeXml(String(raw).trim());
+    if (s === "true") return true;
+    if (s === "false") return false;
+    if (s === "null") return null;
+    if (/^-?\d+(\.\d+)?$/.test(s)) return Number(s);
+    if ((s.startsWith("[") && s.endsWith("]")) || (s.startsWith("{") && s.endsWith("}"))) {
+      try {
+        return JSON.parse(s);
+      } catch {
+        return s;
+      }
+    }
+    return s;
+  }
+
+  // Разбор <dsbridge-tool name="..."> с дочерними тегами-аргументами.
+  function xmlToolFromText(text) {
+    const src = normalize(text);
+    const m = /<dsbridge-tool\s+name\s*=\s*["']([\w.\-]+)["']\s*>([\s\S]*?)<\/dsbridge-tool>/i.exec(src);
+    if (!m) return null;
+    const tool = m[1];
+    const inner = m[2];
+    const args = {};
+    const re = /<([\w.\-]+)(?:\s+[^>]*)?>([\s\S]*?)<\/\1>/g;
+    let mm;
+    while ((mm = re.exec(inner)) !== null) {
+      args[mm[1]] = coerceXmlValue(mm[2]);
+    }
+    return { tool, args };
+  }
+
+  // Ссылка на файл тегами: <dsbridge-file path="report.md">Отчёт</dsbridge-file>
+  // или <dsbridge-file path="report.md" label="Отчёт" />.
+  function xmlFileFromText(text) {
+    const src = normalize(text);
+    const m = /<dsbridge-file\s+([^>]*?)\/?>(?:([\s\S]*?)<\/dsbridge-file>)?/i.exec(src);
+    if (!m) return null;
+    const attrs = m[1];
+    const inner = (m[2] || "").trim();
+    const path_ = (/path\s*=\s*["']([^"']*)["']/i.exec(attrs) || [])[1] || "";
+    const label = (/label\s*=\s*["']([^"']*)["']/i.exec(attrs) || [])[1] || inner || path_;
+    if (!path_) return null;
+    return { path: path_, label };
+  }
+
+  // Картинка тегами: <dsbridge-image src="shot.png" alt="Скриншот" />
+  function xmlImageFromText(text) {
+    const src = normalize(text);
+    const m = /<dsbridge-image\s+([^>]*?)\/?>/i.exec(src);
+    if (!m) return null;
+    const attrs = m[1];
+    const srcAttr = (/src\s*=\s*["']([^"']*)["']/i.exec(attrs) || [])[1] || "";
+    const alt = (/alt\s*=\s*["']([^"']*)["']/i.exec(attrs) || [])[1] || "";
+    if (!srcAttr) return null;
+    return { src: srcAttr, alt };
+  }
+
   function classify(codeEl) {
     const cls = typeof codeEl.className === "string" ? codeEl.className : "";
     const parentCls = codeEl.parentElement && typeof codeEl.parentElement.className === "string" ? codeEl.parentElement.className : "";
     const label = cls + " " + parentCls;
     if (/result/i.test(label)) return null;
 
-    const json = jsonFromText(codeEl.textContent);
-    if (!json) return null;
+    const text = codeEl.textContent;
 
-    if (typeof json.tool === "string") {
-      return { kind: "tool", tool: json.tool, args: json.args && typeof json.args === "object" ? json.args : {} };
+    // Сначала JSON — он был раньше и должен работать как работал.
+    const json = jsonFromText(text);
+    if (json) {
+      if (typeof json.tool === "string") {
+        return { kind: "tool", tool: json.tool, args: json.args && typeof json.args === "object" ? json.args : {} };
+      }
+      if (/dsbridge-image/i.test(label) || typeof json.src === "string") {
+        return { kind: "image", src: String(json.src || json.path || ""), alt: String(json.alt || "") };
+      }
+      if (/dsbridge-file/i.test(label) || (typeof json.path === "string" && (json.label || /dsbridge-file/i.test(label)))) {
+        return { kind: "file", path: String(json.path || ""), label: String(json.label || json.path || "") };
+      }
     }
-    if (/dsbridge-image/i.test(label) || typeof json.src === "string") {
-      return { kind: "image", src: String(json.src || json.path || ""), alt: String(json.alt || "") };
-    }
-    if (/dsbridge-file/i.test(label) || (typeof json.path === "string" && (json.label || /dsbridge-file/i.test(label)))) {
-      return { kind: "file", path: String(json.path || ""), label: String(json.label || json.path || "") };
-    }
+
+    // JSON не вышел — пробуем теги.
+    const xmlTool = xmlToolFromText(text);
+    if (xmlTool) return { kind: "tool", tool: xmlTool.tool, args: xmlTool.args };
+    const xmlImage = xmlImageFromText(text);
+    if (xmlImage) return { kind: "image", src: xmlImage.src, alt: xmlImage.alt };
+    const xmlFile = xmlFileFromText(text);
+    if (xmlFile) return { kind: "file", path: xmlFile.path, label: xmlFile.label };
+
     return null;
   }
 
@@ -1594,9 +1708,10 @@
 
     nodes.forEach((node) => {
       const text = node.textContent.trim();
-      // Дешёвая отсечка: без «{» разбирать нечего. Именно includes, а не
-      // startsWith — перед JSON в блоке бывает подпись языка (Qwen, Z.ai).
-      if (!text.includes("{")) return;
+      // Дешёвая отсечка: разбирать нечего, если нет ни «{» (JSON), ни тега
+      // dsbridge (XML-формат). Именно includes, а не startsWith — перед JSON
+      // в блоке бывает подпись языка (Qwen, Z.ai).
+      if (!text.includes("{") && !/<dsbridge-/i.test(text)) return;
 
       // Разбор кэшируем по тексту узла: во время стриминга текст меняется, и
       // кэш сам себя инвалидирует, а на устоявшемся блоке JSON не парсится
