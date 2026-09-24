@@ -8,6 +8,14 @@ import { log, subscribe } from './logger.mjs';
 import { safeEqual, resolveInJail } from './security.mjs';
 import { TOOLS, runTool } from './tools.mjs';
 import { pickFolder } from './shell.mjs';
+import {
+  handleRpc,
+  authOkMcp,
+  originAllowedMcp,
+  listMcpTools,
+  MCP_PROTOCOL_VERSION,
+} from './mcp.mjs';
+import { McpClientManager } from './mcp-client.mjs';
 
 const MIME = {
   '.png': 'image/png',
@@ -32,6 +40,10 @@ const MIME = {
 const STARTED_AT = Date.now();
 
 const cfg = loadConfig();
+
+// Внешние MCP-серверы. Стартуют в фоне: если какой-то не поднимется, мост всё
+// равно работает — инструменты этого сервера просто не появятся в списке.
+const mcpClients = new McpClientManager(cfg.mcpServers || []);
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
@@ -153,6 +165,72 @@ const server = http.createServer(async (req, res) => {
       return;
     }
 
+    // ---- MCP (Streamable HTTP, JSON-RPC 2.0) ----
+    // Второй транспорт к тому же реестру инструментов. Живёт рядом с /api/tool,
+    // чтобы мост могли подключить Claude Desktop, Cursor, VS Code и прочие
+    // MCP-клиенты — без расширения и без JSON-блоков в чате.
+    if (p === '/mcp') {
+      if (!originAllowedMcp(cfg, req.headers.origin)) {
+        return json(res, req, 403, {
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: -32600, message: 'Origin не разрешён' },
+        });
+      }
+      if (!authOkMcp(cfg, req, url, safeEqual)) {
+        res.writeHead(401, {
+          'Content-Type': 'application/json; charset=utf-8',
+          'WWW-Authenticate': 'Bearer realm="dsbridge"',
+          ...corsHeaders(req),
+        });
+        return res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32001, message: 'Неверный токен' } }));
+      }
+      if (req.method === 'GET') {
+        // Streamable HTTP допускает GET для SSE-потока сервер→клиент. Нам пока
+        // нечего пушить, поэтому вежливо сообщаем, что метод не поддержан.
+        res.writeHead(405, { Allow: 'POST', ...corsHeaders(req) });
+        return res.end();
+      }
+      if (req.method !== 'POST') {
+        res.writeHead(405, { Allow: 'POST', ...corsHeaders(req) });
+        return res.end();
+      }
+
+      const raw = await readBody(req);
+      let payload;
+      try {
+        payload = JSON.parse(raw || 'null');
+      } catch {
+        return json(res, req, 200, {
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: -32700, message: 'Parse error: некорректный JSON' },
+        });
+      }
+      if (payload === null || payload === undefined) {
+        return json(res, req, 200, {
+          jsonrpc: '2.0',
+          id: null,
+          error: { code: -32600, message: 'Пустое сообщение' },
+        });
+      }
+
+      const batch = Array.isArray(payload);
+      const messages = batch ? payload : [payload];
+      const responses = [];
+      for (const msg of messages) {
+        const r = await handleRpc(cfg, msg, mcpClients);
+        if (r !== null) responses.push(r);
+      }
+
+      if (responses.length === 0) {
+        // Все сообщения были уведомлениями — по спецификации отвечаем 202 без тела.
+        res.writeHead(202, corsHeaders(req));
+        return res.end();
+      }
+      return json(res, req, 200, batch ? responses : responses[0]);
+    }
+
     if (!authOk(req, url)) {
       return json(res, req, 401, {
         ok: false,
@@ -161,7 +239,15 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (p === '/api/tools') {
-      return json(res, req, 200, { ok: true, tools: TOOLS });
+      // Родные инструменты + проксированные от внешних MCP-серверов.
+      const external = mcpClients.proxiedTools();
+      return json(res, req, 200, { ok: true, tools: TOOLS, external });
+    }
+
+    // Статус подключённых внешних MCP-серверов: кто жив, сколько инструментов,
+    // какая ошибка при подключении.
+    if (p === '/api/mcp/status') {
+      return json(res, req, 200, { ok: true, servers: mcpClients.status() });
     }
 
     // Отдача файла из рабочей папки (картинки, скачивание). Токен — в query,
@@ -285,7 +371,12 @@ const server = http.createServer(async (req, res) => {
       const args = (payload && payload.args) || {};
       log('info', `→ ${tool}`, { args });
       try {
-        const result = await runTool(cfg, tool, args);
+        // Имя вида "server__tool" уходит внешнему MCP-серверу, остальное —
+        // родным инструментам. Так внешние MCP-инструменты доступны и через
+        // dsbridge-транспорт (расширение), а не только через /mcp.
+        const result = mcpClients.has(tool)
+          ? await mcpClients.call(tool, args)
+          : await runTool(cfg, tool, args);
         log('ok', `✓ ${tool}`, { target: result.path || result.to || result.trashed || null });
         return json(res, req, 200, { ok: true, tool, result });
       } catch (e) {
@@ -311,10 +402,15 @@ function listen(port, attempt = 0) {
       process.exit(1);
     }
   });
-  server.listen(port, '127.0.0.1', () => {
+  server.listen(port, '127.0.0.1', async () => {
     cfg.port = port;
     const url = `http://127.0.0.1:${port}/`;
     log('info', `Мост запущен: ${url}`);
+    // Внешние MCP-серверы подключаем после старта HTTP — чтобы их падение
+    // (или долгий npx) не задерживало основной мост.
+    if ((cfg.mcpServers || []).length) {
+      mcpClients.startAll().catch((e) => log('error', 'MCP-клиенты: ' + e.message));
+    }
     log('info', `Рабочая папка: ${cfg.workspaceRoot}`);
     log('info', `Инструментов: ${TOOLS.length} — ${TOOLS.map((t) => t.name).join(', ')}`);
     if (cfg.autoOpen && !process.env.DSBRIDGE_NO_OPEN) openTarget(url);

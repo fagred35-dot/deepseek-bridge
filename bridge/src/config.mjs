@@ -10,7 +10,7 @@ export const AUDIT_PATH = path.join(DATA_DIR, 'audit.log');
 function defaults() {
   return {
     name: 'Дипсик Мост',
-    version: '0.1.0',
+    version: '0.2.0',
     port: Number(process.env.DSBRIDGE_PORT) || 8443,
     token: crypto.randomBytes(24).toString('hex'),
     workspaceRoot: process.env.DSBRIDGE_WORKSPACE || path.join(os.homedir(), 'DeepSeekWorkspace'),
@@ -26,6 +26,10 @@ function defaults() {
     // поведение как раньше: всё, что вне workspace, отбивается с EPATHJAIL.
     // Нужно, чтобы модель могла помогать с уже существующими проектами.
     extraRoots: [],
+    // Внешние MCP-серверы, к которым мост подключается как клиент. Каждый —
+    // { name, transport: 'stdio'|'http', command?, args?, url?, env?, enabled? }.
+    // Их инструменты появляются в общем списке с префиксом "<name>__".
+    mcpServers: [],
   };
 }
 

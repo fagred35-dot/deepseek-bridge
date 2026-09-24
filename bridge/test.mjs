@@ -126,6 +126,13 @@ async function req(pathname, opts = {}) {
 }
 const tool = (name, args) =>
   req('/api/tool', { method: 'POST', headers: AUTH, body: JSON.stringify({ tool: name, args }) }).then((r) => r.json);
+// Вызов MCP-эндпоинта: JSON-RPC поверх Streamable HTTP. Токен — Bearer.
+const mcp = (method, params, id = 1) =>
+  req('/mcp', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + TOKEN },
+    body: JSON.stringify({ jsonrpc: '2.0', id, method, params }),
+  });
 
 try {
   console.log('Мост:', BASE, '| workspace:', cfg.workspaceRoot);
@@ -1032,6 +1039,82 @@ try {
   const logsNo = await tool('process_logs', { name: 'нет-такого-процесса' });
   check('process_logs без процесса → ENOPROC', logsNo.ok === false && logsNo.error.code === 'ENOPROC', JSON.stringify(logsNo).slice(0, 200));
   await tool('kill_process', { name: 'logger' });
+
+  // ---- MCP (Streamable HTTP) ----
+  const mcpNoToken = await req('/mcp', { method: 'POST', body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }) });
+  check('MCP без токена → 401', mcpNoToken.status === 401, String(mcpNoToken.status));
+
+  const mcpInit = await mcp('initialize', {});
+  check('MCP initialize отвечает serverInfo dsbridge', mcpInit.json && mcpInit.json.result && mcpInit.json.result.serverInfo.name === 'dsbridge', JSON.stringify(mcpInit.json).slice(0, 200));
+  check(
+    'MCP initialize объявляет capabilities.tools',
+    mcpInit.json && mcpInit.json.result.capabilities && !!mcpInit.json.result.capabilities.tools,
+  );
+
+  const mcpList = await mcp('tools/list', {});
+  check('MCP tools/list отдаёт 40 инструментов', mcpList.json && mcpList.json.result.tools.length === 40, String(mcpList.json && mcpList.json.result.tools.length));
+  const mcpNames = mcpList.json.result.tools.map((t) => t.name);
+  check('MCP tools/list включает read_file', mcpNames.includes('read_file'));
+  const mcpListDir = mcpList.json.result.tools.find((t) => t.name === 'list_dir');
+  check('MCP inputSchema типизирован (boolean/number)', mcpListDir.inputSchema.properties.recursive.type === 'boolean' && mcpListDir.inputSchema.properties.maxDepth.type === 'number', JSON.stringify(mcpListDir.inputSchema.properties).slice(0, 200));
+  check('MCP _meta.toolSet проставлен', mcpListDir._meta && mcpListDir._meta.toolSet === 'files');
+
+  const mcpFiles = await mcp('tools/list', { _meta: { toolSet: 'files' } });
+  check(
+    'MCP tools/list фильтрует по toolSet',
+    mcpFiles.json.result.tools.length > 0 && mcpFiles.json.result.tools.every((t) => t._meta.toolSet === 'files'),
+    String(mcpFiles.json.result.tools.length),
+  );
+
+  await tool('write_file', { path: 'mcp-note.txt', content: 'текст для MCP' });
+  const mcpCall = await mcp('tools/call', { name: 'read_file', arguments: { path: 'mcp-note.txt' } });
+  check(
+    'MCP tools/call read_file возвращает содержимое',
+    mcpCall.json.result.isError === false && mcpCall.json.result.content[0].text.includes('текст для MCP'),
+    JSON.stringify(mcpCall.json).slice(0, 200),
+  );
+  check('MCP tools/call отдаёт structuredContent', !!mcpCall.json.result.structuredContent);
+
+  const mcpBad = await mcp('tools/call', { name: 'read_file', arguments: { path: 'нет-такого-файла.txt' } }, 2);
+  check(
+    'MCP ошибка инструмента → isError:true, не JSON-RPC error',
+    !mcpBad.json.error && mcpBad.json.result.isError === true && mcpBad.json.result.content[0].text.includes('ENOENT'),
+    JSON.stringify(mcpBad.json).slice(0, 200),
+  );
+
+  const mcpUnknown = await mcp('нет/такого', {}, 3);
+  check('MCP неизвестный метод → -32601', mcpUnknown.json.error && mcpUnknown.json.error.code === -32601);
+
+  const mcpPing = await mcp('ping', {}, 4);
+  check('MCP ping → пустой результат', mcpPing.json.result && Object.keys(mcpPing.json.result).length === 0);
+
+  // batch: три сообщения, одно — уведомление
+  const mcpBatch = await req('/mcp', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + TOKEN },
+    body: JSON.stringify([
+      { jsonrpc: '2.0', id: 10, method: 'initialize', params: {} },
+      { jsonrpc: '2.0', method: 'notifications/initialized' },
+      { jsonrpc: '2.0', id: 11, method: 'tools/list', params: {} },
+    ]),
+  });
+  check('MCP batch: уведомление не даёт ответа (2 из 3)', Array.isArray(mcpBatch.json) && mcpBatch.json.length === 2, JSON.stringify(mcpBatch.json).slice(0, 120));
+
+  const mcpNotif = await req('/mcp', {
+    method: 'POST',
+    headers: { Authorization: 'Bearer ' + TOKEN },
+    body: JSON.stringify({ jsonrpc: '2.0', method: 'notifications/initialized' }),
+  });
+  check('MCP только уведомление → 202 без тела', mcpNotif.status === 202 && mcpNotif.text === '', String(mcpNotif.status));
+
+  const mcpGet = await req('/mcp', { headers: { Authorization: 'Bearer ' + TOKEN } });
+  check('MCP GET → 405', mcpGet.status === 405, String(mcpGet.status));
+
+  // внешних серверов в конфиге теста нет — но эндпоинт статуса должен отвечать
+  const mcpStatus = await req('/api/mcp/status', { headers: AUTH });
+  check('GET /api/mcp/status отвечает ok', mcpStatus.json && mcpStatus.json.ok === true && Array.isArray(mcpStatus.json.servers), JSON.stringify(mcpStatus.json).slice(0, 200));
+  const toolsWithExternal = await req('/api/tools', { headers: AUTH });
+  check('GET /api/tools отдаёт поле external (пустое без серверов)', Array.isArray(toolsWithExternal.json.external) && toolsWithExternal.json.external.length === 0);
 
   // SSE: подключаемся к потоку, выполняем вызов, ждём событие в стриме
   const ctrl = new AbortController();

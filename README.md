@@ -92,6 +92,59 @@
   проекта без лишнего хода. Файла нет — так и напишут, выдумывать не будут.
 - **Память между чатами.** `remember` пишет в `~/.dsbridge/memory.json`, и заметка доступна
   в следующем чате.
+- **MCP.** Мост — одновременно MCP-сервер и MCP-клиент: его инструменты доступны
+  любому MCP-клиенту (Claude Desktop, Cursor, VS Code), а он сам умеет подключать
+  внешние MCP-серверы и проксировать их инструменты. Подробнее — ниже.
+
+## MCP (Model Context Protocol)
+
+Мост говорит на MCP с двух сторон сразу — как сервер и как клиент.
+
+**Мост как MCP-сервер.** Эндпоинт `POST http://127.0.0.1:8443/mcp` (Streamable HTTP,
+JSON-RPC 2.0) отдаёт те же 40 инструментов: `initialize`, `tools/list`, `tools/call`,
+`ping`. Авторизация — тот же токен, что и у остального API, в заголовке
+`Authorization: Bearer <token>` (или `X-Bridge-Token`, или `?token=`). Origin
+проверяется — защита от DNS rebinding.
+
+Подключение в Claude Desktop (`claude_desktop_config.json`) или Cursor:
+
+```json
+{
+  "mcpServers": {
+    "dsbridge": {
+      "url": "http://127.0.0.1:8443/mcp",
+      "headers": { "Authorization": "Bearer ВАШ_ТОКЕН" }
+    }
+  }
+}
+```
+
+Токен — из веб-UI моста или из `~/.dsbridge/config.json`.
+
+**Мост как MCP-клиент.** В конфиг (`~/.dsbridge/config.json`) можно добавить поле
+`mcpServers` — и мост подключит внешние MCP-серверы, а их инструменты появятся в общем
+списке под именем `<server>__<tool>`. Работают оба транспорта — `stdio` (локальный
+процесс) и `http` (удалённый сервер). Вызывать их можно и через `/mcp`, и через
+`/api/tool` из расширения.
+
+```json
+{
+  "mcpServers": [
+    {
+      "name": "computer",
+      "transport": "stdio",
+      "command": "npx",
+      "args": ["-y", "computer-use-mcp"]
+    }
+  ]
+}
+```
+
+После добавления перезапустите мост. Статус подключённых серверов — `GET /api/mcp/status`.
+
+**Tool Sets.** У каждого инструмента в `tools/list` есть `_meta.toolSet` (`files`, `shell`,
+`git`, `screen`, `memory`, `meta`, `net`). `tools/list` умеет фильтровать по набору —
+заготовка под групповое включение/выключение инструментов.
 
 ## Быстрый старт
 
@@ -154,6 +207,8 @@ node src/server.mjs
 bridge/                  мост: HTTP-сервер и инструменты (Node.js, только stdlib)
   src/server.mjs           маршруты, авторизация, SSE
   src/tools.mjs            реестр TOOLS и все инструменты
+  src/mcp.mjs              MCP-сервер: JSON-RPC 2.0, tools/list, tools/call
+  src/mcp-client.mjs       MCP-клиент: подключение внешних серверов (stdio/http)
   src/security.mjs         path jail, extraRoots, зарезервированные имена Windows
   src/shell.mjs            запуск команд и фоновых процессов
   src/browser.mjs          headless-скриншоты через установленный Chromium
