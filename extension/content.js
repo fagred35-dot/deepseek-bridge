@@ -108,7 +108,23 @@
       id: "arena",
       name: "Arena",
       hosts: ["arena.ai", "lmarena.ai"],
-      send: ['button[type="submit"]'],
+      // Снято с живой страницы 28.09.2026. У arena два композера:
+      //  - агентный режим (/agent/...): contenteditable div.tiptap.ProseMirror
+      //    с placeholder «What would you like to do?»;
+      //  - direct-режим (/direct, /text/direct): обычная textarea[name="message"]
+      //    с placeholder «Ask anything…».
+      // Поле ввода обязательно указывать точно: без него findInput() цепляет
+      // первый [contenteditable="true"] на странице (сайдбар, панели).
+      input: [".tiptap.ProseMirror", 'textarea[name="message"]', '[contenteditable="true"]'],
+      // Кнопка отправки: <button aria-label="Send message"> (в direct-режиме она же
+      // с type="submit"). Пока поле пустое — disabled и pointer-events-none, поэтому
+      // важно сначала вставить текст и дать React обновить состояние.
+      send: ['button[aria-label="Send message"]', 'button[aria-label="Send Message"]', 'button[type="submit"]'],
+      // Файловых input в разметке ДВА: видимый в agent-композере (без accept)
+      // и скрытый в display:none-шелле direct-режима (с accept на картинки).
+      // Общий селектор + проверка видимости в findFileInput выбирает верный.
+      fileInput: ['input[type="file"]'],
+      generating: ["stop"],
     },
     {
       id: "zai",
@@ -250,6 +266,45 @@
     if (!node) return false;
     if (node.disabled) return false;
     return node.getAttribute("aria-disabled") !== "true";
+  }
+
+  // Элемент реально показан на странице. Нужен в первую очередь для полей
+  // ввода: у современных чатов в DOM живут СКРЫТЫЕ дубли композера.
+  //
+  // Живой пример — arena.ai: под видимым редактором TipTap лежит скрытая
+  // <textarea aria-hidden="true" tabindex="-1" visibility:hidden> для замера
+  // высоты, а в конце документа отрисован ещё один шелл целиком в display:none.
+  // Без этой проверки querySelector("textarea") возвращает именно скрытую —
+  // текст уходит в неё, React о нём не знает, кнопка отправки остаётся disabled.
+  function isVisible(node) {
+    if (!node || !node.isConnected) return false;
+    if (node.getAttribute("aria-hidden") === "true") return false;
+    if (node.closest && node.closest('[aria-hidden="true"]')) return false;
+    let style;
+    try {
+      style = getComputedStyle(node);
+    } catch {
+      return false;
+    }
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    const rect = node.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  }
+
+  // Первый подходящий элемент из списка селекторов среди ВИДИМЫХ. Как и
+  // queryFirst, битый селектор пропускается.
+  function queryFirstVisible(selectors, root) {
+    const scope = root || document;
+    for (const sel of selectors || []) {
+      let nodes;
+      try {
+        nodes = scope.querySelectorAll(sel);
+      } catch {
+        continue;
+      }
+      for (const n of nodes) if (isVisible(n)) return n;
+    }
+    return null;
   }
 
   // ---------- настройки панели ----------
@@ -1527,10 +1582,38 @@
     return new File([bytes], name, { type: mime });
   }
 
+  // Файловое поле. Тонкость: file input почти всегда «невидим» через
+  // clip/clip-path (клик по нему открывает системный диалог, поэтому его прячут).
+  // Значит, isVisible по rect тут не подходит. Зато подходит проверка «предок не
+  // в display:none» — она отсеивает input'ы из скрытых шеллов (у arena.ai их два:
+  // один в видимом композере, другой в display:none-копии direct-режима).
+  function isInRenderedTree(node) {
+    let n = node;
+    while (n && n !== document.documentElement) {
+      let style;
+      try {
+        style = getComputedStyle(n);
+      } catch {
+        return false;
+      }
+      if (style.display === "none" || style.visibility === "hidden") return false;
+      n = n.parentElement;
+    }
+    return true;
+  }
+
   function findFileInput() {
-    const specific = queryFirst(site && site.fileInput ? site.fileInput : []);
-    if (specific) return specific;
-    const inputs = Array.from(document.querySelectorAll('input[type="file"]'));
+    const listed = site && site.fileInput ? site.fileInput : [];
+    for (const sel of listed) {
+      let nodes;
+      try {
+        nodes = document.querySelectorAll(sel);
+      } catch {
+        continue;
+      }
+      for (const n of nodes) if (isInRenderedTree(n)) return n;
+    }
+    const inputs = Array.from(document.querySelectorAll('input[type="file"]')).filter(isInRenderedTree);
     if (!inputs.length) return null;
     // Предпочитаем тот, что принимает картинки: у чата их может быть несколько
     // (вложение файла, картинка, аватар).
@@ -1800,14 +1883,28 @@
   // ChatGPT и Claude, Quill у Gemini, свои редакторы у остальных). Ищем по
   // порядку: селекторы сайта → textarea → contenteditable → role=textbox.
 
+  // Поле ввода ищем только среди ВИДИМЫХ: скрытые дубли композера — обычное
+  // дело, и текст, положенный в них, до React не доходит (см. isVisible).
+  //
+  // Порядок: сначала селекторы сайта, потом общие. В общих textarea идёт ПЕРЕД
+  // contenteditable, но с проверкой видимости это безопасно: скрытая зеркальная
+  // textarea отсеивается, и для TipTap-композеров находится редактор.
   function findInput() {
-    const specific = queryFirst(site && site.input ? site.input : []);
+    const specific = queryFirstVisible(site && site.input ? site.input : []);
     if (specific) return specific;
     return (
+      queryFirstVisible([
+        'textarea:not([aria-hidden="true"])',
+        '[contenteditable="true"][role="textbox"]',
+        '[contenteditable="true"]',
+        '[role="textbox"]',
+      ]) ||
+      // Совсем ничего видимого не нашлось — отдаём хоть что-то, чтобы вызвавший
+      // код мог показать внятную диагностику, а не молчаливое «нет поля».
+      queryFirst(site && site.input ? site.input : []) ||
       document.querySelector("textarea") ||
-      document.querySelector('[contenteditable="true"][role="textbox"]') ||
       document.querySelector('[contenteditable="true"]') ||
-      document.querySelector('[role="textbox"]')
+      null
     );
   }
 
@@ -1828,21 +1925,59 @@
   // (ProseMirror, Lexical, Quill) не замечают — своё состояние они обновляют
   // только по настоящему вводу. Поэтому выделяем всё и вставляем командой
   // insertText: она идёт через ввод, и редактор видит текст как свой.
+  function selectAllIn(node) {
+    const range = document.createRange();
+    range.selectNodeContents(node);
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+
+  // contenteditable: прямое присваивание textContent редакторы на React
+  // (ProseMirror, Lexical, Quill, TipTap) не замечают — своё состояние они
+  // обновляют только по настоящему вводу. Пробуем три пути по очереди:
+  //
+  //  1. execCommand("insertText") — работает у Quill/Lexical;
+  //  2. событие paste с DataTransfer — TipTap/ProseMirror обрабатывают именно
+  //     его, а синтетический insertText у них часто игнорируется;
+  //  3. присваивание textContent + событие input — грубо, но иногда оживляет
+  //     простые редакторы.
+  //
+  // Проверять результат бесполезно: настоящий DOM обновляет сам React уже после
+  // нашего вызова, асинхронно. Поэтому «получилось» = «не бросили исключение»,
+  // а дальше видно по кнопке отправки.
   function insertIntoEditable(node, text) {
     node.focus();
+
     try {
-      const range = document.createRange();
-      range.selectNodeContents(node);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
+      selectAllIn(node);
       if (document.execCommand("insertText", false, text)) {
         node.dispatchEvent(new Event("input", { bubbles: true }));
         return true;
       }
     } catch {
-      // execCommand может быть недоступен — ниже присваивание как запасной путь
+      // переходим к следующему способу
     }
+
+    try {
+      selectAllIn(node);
+      const dt = new DataTransfer();
+      dt.setData("text/plain", text);
+      const paste = new ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: dt });
+      // Синтетический ClipboardEvent в браузере часто приходит без clipboardData,
+      // потому что поле readonly. Подкладываем свой DataTransfer напрямую.
+      if (!paste.clipboardData) {
+        Object.defineProperty(paste, "clipboardData", { value: dt });
+      }
+      const notCancelled = node.dispatchEvent(paste);
+      if (!notCancelled) {
+        // Редактор сам вставил текст из события — больше ничего не нужно.
+        return true;
+      }
+    } catch {
+      // переходим к последнему способу
+    }
+
     node.textContent = text;
     node.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: text }));
     return true;
@@ -1948,17 +2083,45 @@
     return null;
   }
 
+  // Ждём, пока кнопка отправки станет кликабельной. После вставки текста React
+  // снимает disabled НЕ сразу, а на следующем кадре-двух: у arena.ai кнопка
+  // вообще pointer-events-none, пока поле пустое. Если кликнуть раньше — клик
+  // уходит в никуда, и снаружи это выглядит как «авто-отправка не работает».
+  async function waitForSendEnabled(maxMs = 2500) {
+    const started = Date.now();
+    while (Date.now() - started < maxMs) {
+      const btn = findSendButton();
+      if (btn) return btn;
+      await sleep(120);
+    }
+    return null;
+  }
+
   async function submitInput() {
+    // Небольшая пауза до первого опроса: даём React обработать событие ввода.
     await new Promise((r) => setTimeout(r, 200));
-    const btn = findSendButton();
+
+    const btn = await waitForSendEnabled();
     if (btn) {
       btn.click();
       return true;
     }
+
+    // Кнопки нет или она всё ещё disabled. Пробуем Enter по полю — многие
+    // композеры отправляют именно так, а TipTap/ProseMirror ловят keydown.
     const node = findInput();
     if (node) {
       for (const type of ["keydown", "keypress", "keyup"]) {
-        node.dispatchEvent(new KeyboardEvent(type, { key: "Enter", code: "Enter", keyCode: 13, which: 13, bubbles: true }));
+        node.dispatchEvent(
+          new KeyboardEvent(type, {
+            key: "Enter",
+            code: "Enter",
+            keyCode: 13,
+            which: 13,
+            bubbles: true,
+            cancelable: true,
+          }),
+        );
       }
       return true;
     }

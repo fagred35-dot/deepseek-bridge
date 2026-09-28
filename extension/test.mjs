@@ -511,5 +511,79 @@ eq("файла нет — уровень info", memApi.memoryHintLevel(), "info"
 memApi.setState("мост не ответил");
 eq("мост молчит — уровень info", memApi.memoryHintLevel(), "info");
 
+console.log("\nвидимость элементов");
+
+// Моки DOM: реальный браузер в Node не запустить, а isVisible — именно то,
+// что ломалось на arena.ai. Там под видимым TipTap-редактором лежит СКРЫТАЯ
+// <textarea aria-hidden="true" visibility:hidden> для замера высоты, и без
+// проверки видимости querySelector("textarea") возвращал её: текст уходил в
+// скрытое поле, React о нём не знал, кнопка отправки оставалась disabled.
+function fakeNode(opts = {}) {
+  return {
+    isConnected: opts.connected !== false,
+    _style: opts.style || { display: "block", visibility: "visible" },
+    _ariaHidden: opts.ariaHidden ?? null,
+    _hiddenAncestor: opts.hiddenAncestor === true,
+    _rect: opts.rect || { width: 100, height: 30 },
+    parentElement: opts.parentElement ?? null,
+    getAttribute(name) {
+      return name === "aria-hidden" ? this._ariaHidden : null;
+    },
+    closest(sel) {
+      return this._hiddenAncestor && sel === '[aria-hidden="true"]' ? { hidden: true } : null;
+    },
+    getBoundingClientRect() {
+      return this._rect;
+    },
+  };
+}
+
+const docRoot = { parentElement: null };
+docRoot.documentElement = docRoot;
+const mockDocument = { documentElement: docRoot };
+
+function mockGetComputedStyle(node) {
+  return node._style || { display: "block", visibility: "visible" };
+}
+
+const vis = new Function(
+  "document",
+  "getComputedStyle",
+  [
+    extractFunction("isVisible"),
+    extractFunction("queryFirstVisible"),
+    extractFunction("isInRenderedTree"),
+    "return { isVisible, queryFirstVisible, isInRenderedTree };",
+  ].join("\n"),
+)(mockDocument, mockGetComputedStyle);
+
+ok("обычный видимый элемент → true", vis.isVisible(fakeNode()) === true);
+ok("aria-hidden на узле → скрыт", vis.isVisible(fakeNode({ ariaHidden: "true" })) === false);
+ok("aria-hidden на предке → скрыт", vis.isVisible(fakeNode({ hiddenAncestor: true })) === false);
+ok("display:none → скрыт", vis.isVisible(fakeNode({ style: { display: "none", visibility: "visible" } })) === false);
+ok("visibility:hidden → скрыт", vis.isVisible(fakeNode({ style: { display: "block", visibility: "hidden" } })) === false);
+ok("нулевой rect → скрыт", vis.isVisible(fakeNode({ rect: { width: 0, height: 0 } })) === false);
+ok("отсоединённый узел → скрыт", vis.isVisible(fakeNode({ connected: false })) === false);
+
+// queryFirstVisible: первый ВИДИМЫЙ из совпавших
+const invisible = fakeNode({ hiddenAncestor: true });
+const visibleA = fakeNode();
+const visibleB = fakeNode();
+const scope = {
+  querySelectorAll(sel) {
+    return sel === ".hit" ? [invisible, visibleA, visibleB] : [];
+  },
+};
+ok("queryFirstVisible пропускает невидимые", vis.queryFirstVisible([".hit"], scope) === visibleA);
+ok("queryFirstVisible: нет совпадений → null", vis.queryFirstVisible([".none"], scope) === null);
+ok("queryFirstVisible: битый селектор пропускается", vis.queryFirstVisible(["[[["], scope) === null);
+
+// isInRenderedTree: предок в display:none → файл-инпут из скрытого шелла не берём
+ok("обычный узел в дереве", vis.isInRenderedTree(fakeNode({ parentElement: docRoot })) === true);
+const parentHidden = fakeNode({ style: { display: "none", visibility: "visible" } });
+parentHidden.parentElement = docRoot;
+const childOfHidden = fakeNode({ parentElement: parentHidden });
+ok("узел внутри display:none → не в дереве", vis.isInRenderedTree(childOfHidden) === false);
+
 console.log("\n" + (fail ? "Итог: " + pass + " ok, " + fail + " fail" : "Итог: " + pass + " ok, 0 fail"));
 process.exit(fail ? 1 : 0);

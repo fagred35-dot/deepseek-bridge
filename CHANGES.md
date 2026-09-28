@@ -9,6 +9,59 @@
 
 ---
 
+## 28.09.2026 — arena.ai: нашёл, почему не работала авто-отправка
+
+**Симптом.** На arena.ai авто-отправка команд не срабатывала, результат не вставлялся
+в чат, картинки не прикреплялись.
+
+**Причина — три бага разом, все от одной слепой зоны.**
+
+1. **Поле ввода.** В конфиге для arena не было селектора `input` вообще, поэтому
+   `findInput()` падал в общий путь и вызывал `document.querySelector("textarea")`.
+   А у arena в разметке живёт **скрытая** `<textarea aria-hidden="true" tabindex="-1"
+   visibility:hidden>` — зеркало редактора для замера высоты. Текст уходил в неё,
+   React о нём не знал, кнопка отправки оставалась `disabled`. Видимый композер —
+   это `div.tiptap.ProseMirror` (в agent-режиме) или `textarea[name="message"]`
+   (в direct-режиме).
+
+2. **Кнопка отправки.** Селектор был только `button[type="submit"]`, а у arena
+   кнопка — `<button aria-label="Send message">` с `type="button"` и
+   `pointer-events-none`, пока поле пустое. Нажималась не та кнопка и не в тот момент.
+
+3. **Файловый input.** У arena их **два**: видимый в agent-композере (без `accept`)
+   и скрытый в `display:none`-шелле direct-режима (с `accept` на картинки). Селектор
+   `[accept*="image"]` выбирал скрытый — вложение уходило в никуда.
+
+**Что сделано в коде.**
+
+- Новая `isVisible(node)`: отсеивает `aria-hidden`, `display:none`, `visibility:hidden`,
+  нулевой rect, отсоединённые узлы и узлы с `aria-hidden`-предком.
+- Новая `queryFirstVisible`: как `queryFirst`, но возвращает только видимое.
+- `findInput()` теперь ищет только среди видимых. Порядок textarea-перед-contenteditable
+  сохранён и стал безопасен: скрытая зеркальная textarea отсеивается.
+- Новая `isInRenderedTree(node)`: для файловых input'ов нельзя применять `isVisible`
+  (их прячут через clip, rect нулевой у всех). Проверяем предков на `display:none` —
+  это и разделяет два file-input'а arena.
+- Новая `waitForSendEnabled()`: после вставки текста React снимает `disabled` не сразу,
+  а на следующем кадре-двух. Клик раньше уходил в никуда. Теперь `submitInput()` ждёт
+  до 2.5 с, и только потом пробует Enter по полю.
+- `insertIntoEditable`: три способа по очереди — `execCommand("insertText")` (Quill,
+  Lexical), событие `paste` с `DataTransfer` (TipTap/ProseMirror — они слушают именно
+  paste, синтетический insertText у них часто игнорируется), и присваивание
+  `textContent` в последнюю очередь.
+- Конфиг arena получил `input`, `send`, `fileInput` и `generating`.
+
+**Чем проверено.** `extension/test.mjs` — **126 ok / 0 fail** (было 114, +12 на
+видимость и queryFirstVisible). `extension/test-inject.mjs` — 22 ok,
+`extension/test-xml.mjs` — 34 ok. `extension/smoke/run.mjs` — 22 ok. Версия
+расширения: 0.13.0 → 0.14.0.
+
+**Хвост.** Это правки по разбору разметки arena.ai: проверено на моках DOM, но не
+на живой странице в браузере. Если на реальном arena.ai что-то ещё не сойдётся —
+диагностика панели (`scan(true)` и dumpDom) покажет, какой селектор промахнулся.
+
+---
+
 ## 25.09.2026 — персонажи и скиллы (пункт 4 wishlist)
 
 **Задача.** Кастомные персонажи и скиллы — «если позиционировать продукт как рабочую
