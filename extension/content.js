@@ -287,8 +287,12 @@
       return false;
     }
     if (style.display === "none" || style.visibility === "hidden") return false;
+    // Ширина ИЛИ высота, не И: пустое поле ввода без содержимого легко может
+    // иметь нулевую высоту (однострочный contenteditable до ввода), и требование
+    // обоих размеров отсеяло бы живой композер. Скрытая зеркальная textarea
+    // даёт нули по обеим осям, так что она по-прежнему отсеивается.
     const rect = node.getBoundingClientRect();
-    return rect.width > 0 && rect.height > 0;
+    return rect.width > 0 || rect.height > 0;
   }
 
   // Первый подходящий элемент из списка селекторов среди ВИДИМЫХ. Как и

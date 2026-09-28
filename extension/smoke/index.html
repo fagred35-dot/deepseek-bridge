@@ -14,6 +14,20 @@
   <input type="file" accept="image/*" id="file">
 </div>
 
+<!-- Разметка как у arena.ai: под видимым редактором лежит СКРЫТАЯ зеркальная
+     textarea (aria-hidden + visibility:hidden), а в конце документа — целый
+     шелл композера в display:none. Раньше findInput() цеплял именно скрытую
+     textarea, текст уходил в неё, React о нём не знал, кнопка оставалась
+     disabled, и авто-отправка «не работала». -->
+<div id="arena-shell" aria-hidden="true" style="visibility:hidden; position:absolute; left:-9999px">
+  <textarea id="arena-mirror" aria-hidden="true" tabindex="-1"></textarea>
+</div>
+<div id="arena-hidden" style="display:none">
+  <div class="ProseMirror" contenteditable="true"></div>
+  <button aria-label="Send message">скрытая</button>
+  <input type="file" accept="image/*">
+</div>
+
 <!-- Лента сообщений. Её целиком перерисовывают в тесте: так ведёт себя настоящий
      чат, когда прокручиваешь вверх — старые сообщения создаются заново. -->
 <div id="chat">
@@ -36,6 +50,11 @@
 <script>
   window.__sent = 0;
   document.getElementById("send").addEventListener("click", () => { window.__sent++; });
+  // Скрытые дубли из arena-разметки: если content.js по ошибке выберет их,
+  // клик и текст уйдут туда — и это сразу видно по счётчикам.
+  window.__hiddenSent = 0;
+  const hiddenBtn = document.querySelector('#arena-hidden button[aria-label="Send message"]');
+  if (hiddenBtn) hiddenBtn.addEventListener("click", () => { window.__hiddenSent++; });
   // Исходная разметка ленты: по ней будем имитировать перерисовку при прокрутке.
   window.__chatHtml = document.getElementById("chat").innerHTML;
 
@@ -76,6 +95,16 @@
     add("результат инструмента попал в поле ввода", text.includes("Результат") && text.includes("read_file"), JSON.stringify(text.slice(0, 120)));
     add("в поле попал ответ моста", text.includes("привет из моста"));
     add("кнопка отправки нажата", window.__sent > 0, "кликов: " + window.__sent);
+
+    // --- arena.ai: скрытые дубли композера ---
+    // Под видимым редактором лежит зеркальная textarea (aria-hidden +
+    // visibility:hidden), а в конце документа — шелл в display:none. Пока
+    // findInput() брал первый textarea из DOM, текст уходил в скрытую, и
+    // авто-отправка на arena не работала.
+    const mirror = document.getElementById("arena-mirror");
+    add("текст НЕ ушёл в скрытую зеркальную textarea", (mirror.value || "") === "", JSON.stringify((mirror.value || "").slice(0, 60)));
+    add("текст попал в видимый редактор", prompt.textContent.includes("привет из моста"));
+    add("скрытая кнопка отправки не нажата", window.__hiddenSent === 0, "кликов: " + window.__hiddenSent);
 
     add("в логе есть выполнение вызова", logText().includes("→ read_file"));
     add("в логе есть отправка", logText().includes("результат отправлен автоматически"));
