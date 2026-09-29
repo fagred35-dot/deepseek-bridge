@@ -43,6 +43,25 @@
     <div class="qwen-markdown-code-line">{ "tool": "stat", "args": { "path": "notes.md" } }</div>
   </div>
 </div>
+
+<!-- Разметка как у Z.ai: блок кода — CodeMirror 6. Никаких <pre>/<code>,
+     текст разбит на строки div.cm-line внутри div.cm-content, а контейнер
+     помечен классом языка language-dsbridge. Раньше candidateNodes искал
+     только <pre>/<code> и такую разметку молча пропускал: панель писала
+     «блоков: 0», а вызов не выполнялся. -->
+<div class="markdown-prose">
+  <div class="relative my-2 flex flex-col">
+    <div class="language-dsbridge rounded-b-lg overflow-hidden">
+      <div class="cm-editor">
+        <div class="cm-scroller">
+          <div class="cm-content">
+            <div class="cm-line">{ "tool": "hash", "args": { "path": "notes.md" } }</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
 </div>
 
 <div id="RESULT">ещё не готово</div>
@@ -95,6 +114,16 @@
     add("результат инструмента попал в поле ввода", text.includes("Результат") && text.includes("read_file"), JSON.stringify(text.slice(0, 120)));
     add("в поле попал ответ моста", text.includes("привет из моста"));
     add("кнопка отправки нажата", window.__sent > 0, "кликов: " + window.__sent);
+
+    // --- Z.ai: CodeMirror вместо <pre>/<code> ---
+    add("вызов из CodeMirror (Z.ai) выполнен", logText().includes("→ hash"), logText().slice(-160));
+    add("блок CodeMirror скрыт карточкой", (() => {
+      // Именно div: в тесте есть ещё <code class="language-dsbridge"> в старом
+      // блоке, и он тоже .language-dsbridge. Без уточнения querySelector вернёт
+      // его, а не div от CodeMirror.
+      const cm = document.querySelector("div.language-dsbridge");
+      return !!cm && cm.style.display === "none";
+    })());
 
     // --- arena.ai: скрытые дубли композера ---
     // Под видимым редактором лежит зеркальная textarea (aria-hidden +

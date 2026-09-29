@@ -123,6 +123,10 @@ const classifySandbox = new Function(
     extractFunction("xmlToolFromText"),
     extractFunction("xmlFileFromText"),
     extractFunction("xmlImageFromText"),
+    // classify теперь читает текст через codeTextFrom (нужно для CodeMirror на
+    // Z.ai: .cm-line). В песочницу надо положить обе функции, иначе classify
+    // упадёт с ReferenceError.
+    extractFunction("codeTextFrom"),
     extractFunction("classify"),
     "return { classify };",
   ].join("\n"),

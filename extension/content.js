@@ -1205,7 +1205,10 @@
     const label = cls + " " + parentCls;
     if (/result/i.test(label)) return null;
 
-    const text = codeEl.textContent;
+    // codeTextFrom, а не textContent: у CodeMirror (Z.ai) строки разбиты на
+    // .cm-line, и прямой textContent склеит их без переносов — многострочный
+    // JSON развалится при разборе.
+    const text = codeTextFrom(codeEl);
 
     // Сначала JSON — он был раньше и должен работать как работал.
     const json = jsonFromText(text);
@@ -1283,6 +1286,32 @@
     }
   }
 
+  // Текст блока кода. Особый случай — CodeMirror 6 (Z.ai перешёл на него
+  // 29.09.2026): текст разбит на строки-дивы div.cm-line внутри div.cm-content,
+  // никаких <pre>/<code> там нет. Прямой textContent контейнера их склеит без
+  // переносов, и многострочный JSON развалится — поэтому .cm-line собираем
+  // через \n.
+  function codeTextFrom(node) {
+    if (!node) return "";
+    let cm = null;
+    try {
+      // Сначала ищем .cm-content в самом узле или среди прямых потомков.
+      cm = node.classList && node.classList.contains("cm-content")
+        ? node
+        : node.querySelector && node.querySelector(".cm-content");
+    } catch {
+      cm = null;
+    }
+    if (cm) {
+      const lines = cm.querySelectorAll(".cm-line");
+      if (lines.length) {
+        return Array.from(lines).map((l) => l.textContent).join("\n");
+      }
+      return cm.textContent || "";
+    }
+    return node.textContent || "";
+  }
+
   function candidateNodes() {
     const out = [];
     const push = (node) => {
@@ -1303,8 +1332,18 @@
       if (node.querySelector("code")) return;
       push(node);
     });
+    // CodeMirror 6 (Z.ai): контейнер блока помечен классом языка, внутри —
+    // .cm-editor с .cm-content. Это НЕ <pre>/<code>, поэтому берём отдельным
+    // проходом. Содержимое достаёт codeTextFrom, разбивая .cm-line на строки.
+    document.querySelectorAll('[class*="language-"]').forEach((node) => {
+      if (node.querySelector("pre, code")) return;
+      const text = codeTextFrom(node).trim();
+      if (!text) return;
+      if (/\{\s*"(tool|src|path)"/.test(text) || /<dsbridge-/i.test(text)) push(node);
+    });
     document.querySelectorAll('[class*="code"], [class*="Code"]').forEach((node) => {
       if (node.querySelector("pre, code")) return;
+      if (node.querySelector(".cm-content")) return;
       if (/\{\s*"(tool|src|path)"/.test(node.textContent)) push(node);
     });
     return out;
@@ -1921,7 +1960,9 @@
     let fresh = 0;
 
     nodes.forEach((node) => {
-      const text = node.textContent.trim();
+      // codeTextFrom, а не textContent: у CodeMirror (Z.ai) строки разбиты на
+      // .cm-line, и прямой textContent склеит их без переносов.
+      const text = codeTextFrom(node).trim();
       // Дешёвая отсечка: разбирать нечего, если нет ни «{» (JSON), ни тега
       // dsbridge (XML-формат). Именно includes, а не startsWith — перед JSON
       // в блоке бывает подпись языка (Qwen, Z.ai).
