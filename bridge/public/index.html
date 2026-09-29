@@ -253,6 +253,15 @@
   </section>
 
   <section class="card">
+    <h2>Управление вводом</h2>
+    <label class="switch">
+      <input type="checkbox" id="allowInput">
+      <span>Разрешить <b>gui_*</b> — клики, текст и клавиши в чужих окнах</span>
+    </label>
+    <div class="hint warn">Самый опасный флаг: с ним модель может нажимать что угодно в любой программе на твоём компьютере. По умолчанию выключено. Фоновый режим (background) курсор не двигает и фокус не ворует — твоя мышь и клавиатура работают как обычно.</div>
+  </section>
+
+  <section class="card">
     <h2>Дополнительные папки</h2>
     <div class="hint">Проекты вне рабочей папки, с которыми модели разрешено работать. По одному пути на строку. Пустой список — доступ только внутри рабочей папки.</div>
     <textarea id="extraRoots" rows="4" spellcheck="false" placeholder="C:\Users\ВаНя\Desktop\мой проект"></textarea>
@@ -290,43 +299,57 @@
   const dot = document.getElementById("dot");
   const statusEl = document.getElementById("status");
 
-  const INSTRUCTION = [
-    "Ты работаешь автономно с локальными файлами через инструменты.",
-    "Не спрашивай разрешения и не пиши «давай я прочитаю этот файл» — просто вызови инструмент.",
-    "",
-    "Чтобы вызвать инструмент, выведи ОДИН блок кода с языком dsbridge и валидным JSON:",
-    "",
-    "```dsbridge",
-    '{ "tool": "list_dir", "args": { "path": "." } }',
-    "```",
-    "",
-    "Инструменты:",
-    "- list_dir {path}",
-    "- read_file {path}",
-    "- write_file {path, content, mode: overwrite|append}",
-    "- make_dir {path}",
-    "- move {from, to}",
-    "- copy {from, to}",
-    "- delete {path}",
-    "- stat {path}",
-    "- search {query, path}",
-    "- run_command {command, shell: powershell|cmd|bash, cwd, timeoutMs}",
-    "",
-    "ПАМЯТЬ ПРОЕКТА (обязательно)",
-    "- У каждой рабочей папки своя память: файл MEMORY.md в её корне. Это память",
-    "  именно этого проекта, а не общая.",
-    "- В начале задачи прочитай MEMORY.md, если он есть, — не переспрашивай то, что там записано.",
-    "- После существенной работы (разобрался в проекте, поменял код, нашёл грабли, принял",
-    "  решение) допиши в MEMORY.md то, что пригодится в следующий раз: что за проект, команды",
-    "  запуска и тестов, конвенции, открытые хвосты. Держи файл коротким — это сводка, не свалка.",
-    "- Пиши через write_file (mode: append) или edit_file. Нет что писать — не трогай файл.",
-    "",
-    "Правила:",
-    "- Один вызов на сообщение; дождись результата и продолжай сам, без лишних вопросов.",
-    "- Если просят посмотреть, найти, создать, изменить или выполнить — сразу вызывай инструмент.",
-    "- Пути — относительно рабочей папки. Команды выполняются в ней же."
-  ].join("\n");
-  document.getElementById("instr").textContent = INSTRUCTION;
+  // Инструкция для модели собирается ИЗ РЕЕСТРА моста (/api/tools), а не пишется
+  // руками. Раньше здесь был захардкоженный список на 10 инструментов — он
+  // отставал от моста (инструментов 60) и вводил модель в заблуждение. Теперь
+  // список всегда актуален: новый инструмент появляется в мосте — появляется и
+  // здесь. Тексты про память проекта и правила — статичные, они от реестра не
+  // зависят.
+  let INSTRUCTION = "";
+
+  function buildInstruction(tools) {
+    const rows = (tools || []).map((t) => {
+      const keys = t.parameters && typeof t.parameters === "object" ? Object.keys(t.parameters) : [];
+      const args = keys.length ? " {" + keys.join(", ") + "}" : "";
+      return "- " + t.name + args + " — " + (t.description || "");
+    });
+    return [
+      "Ты работаешь автономно с локальными файлами через инструменты.",
+      "Не спрашивай разрешения и не пиши «давай я прочитаю этот файл» — просто вызови инструмент.",
+      "",
+      "Чтобы вызвать инструмент, выведи блок кода с языком dsbridge и валидным JSON:",
+      "",
+      "```dsbridge",
+      '{ "tool": "list_dir", "args": { "path": "." } }',
+      "```",
+      "",
+      "Есть и второй формат — XML-теги (когда JSON ломается):",
+      '<dsbridge-tool name="edit_file"><path>a.js</path><old_string>x</old_string><new_string>y</new_string></dsbridge-tool>',
+      "",
+      "ИНСТРУМЕНТЫ (" + (tools ? tools.length : 0) + "):",
+      ...rows,
+      "",
+      "ПАМЯТЬ ПРОЕКТА (обязательно)",
+      "- У каждой рабочей папки своя память: файл MEMORY.md в её корне. Это память",
+      "  именно этого проекта, а не общая.",
+      "- В начале задачи прочитай MEMORY.md, если он есть, — не переспрашивай то, что там записано.",
+      "- После существенной работы (разобрался в проекте, поменял код, нашёл грабли, принял",
+      "  решение) допиши в MEMORY.md то, что пригодится в следующий раз: что за проект, команды",
+      "  запуска и тестов, конвенции, открытые хвосты. Держи файл коротким — это сводка, не свалка.",
+      "- Пиши через write_file (mode: append) или edit_file. Нет что писать — не трогай файл.",
+      "",
+      "ПРАВИЛА",
+      "- Один вызов на сообщение; дождись результата и продолжай сам, без лишних вопросов.",
+      "- Если просят посмотреть, найти, создать, изменить или выполнить — сразу вызывай инструмент.",
+      "- Пути — относительно рабочей папки. Команды выполняются в ней же.",
+      "- Сначала посмотри, потом сделай, потом проверь.",
+      "",
+      "ФЛАГИ МОСТА (включаются в UI; при EDISABLED скажи, какой флаг нужен, и не повторяй)",
+      "- «Выполнение команд» — run_command, python, изменяющий git, процессы.",
+      "- «Сетевой доступ» — download, http_get, http_post.",
+      "- «Управление вводом» — gui_* (клики, текст, клавиши в чужих окнах).",
+    ].join("\n");
+  }
 
   async function health() {
     try {
@@ -339,6 +362,8 @@
         if (cb) cb.checked = j.allowCommands === true;
         const nb = document.getElementById("allowNet");
         if (nb) nb.checked = j.allowNetwork === true;
+        const ib = document.getElementById("allowInput");
+        if (ib) ib.checked = j.allowInput === true;
         // Не перетираем текст, пока пользователь его правит.
         const er = document.getElementById("extraRoots");
         if (er && document.activeElement !== er) er.value = (j.extraRoots || []).join("\n");
@@ -356,9 +381,10 @@
     try {
       const r = await fetch("/api/tools", { headers: H });
       const j = await r.json();
+      const list = j.tools || [];
       const ul = document.getElementById("tools");
       ul.innerHTML = "";
-      (j.tools || []).forEach((t) => {
+      list.forEach((t) => {
         const li = document.createElement("li");
         const b = document.createElement("b");
         b.textContent = t.name;
@@ -367,6 +393,9 @@
         li.append(b, s);
         ul.append(li);
       });
+      // Инструкция собирается из того же списка — она всегда в курсе реестра.
+      INSTRUCTION = buildInstruction(list);
+      document.getElementById("instr").textContent = INSTRUCTION;
     } catch {}
   }
 
@@ -427,6 +456,10 @@
   document.getElementById("allowNet").addEventListener("change", async (e) => {
     await fetch("/api/settings", { method: "POST", headers: H, body: JSON.stringify({ allowNetwork: e.target.checked }) });
     addEvent({ ts: new Date().toISOString(), level: e.target.checked ? "warn" : "info", message: "Сетевой доступ: " + (e.target.checked ? "включён" : "выключен") });
+  });
+  document.getElementById("allowInput").addEventListener("change", async (e) => {
+    await fetch("/api/settings", { method: "POST", headers: H, body: JSON.stringify({ allowInput: e.target.checked }) });
+    addEvent({ ts: new Date().toISOString(), level: e.target.checked ? "warn" : "info", message: "Управление вводом: " + (e.target.checked ? "включено" : "выключено") });
   });
 
   document.getElementById("addRoot").onclick = async () => {

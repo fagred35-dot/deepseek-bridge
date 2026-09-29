@@ -163,7 +163,7 @@ try {
   // Страховка от переделки вёрстки: скрипт страницы ищет элементы по id, и
   // пропавший id ломает интерфейс молча — страница открывается, кнопка не работает.
   const REQUIRED_UI_IDS = [
-    'dot', 'status', 'open', 'pick', 'allowCmd', 'allowNet', 'extraRoots', 'addRoot',
+    'dot', 'status', 'open', 'pick', 'allowCmd', 'allowNet', 'allowInput', 'extraRoots', 'addRoot',
     'saveRoots', 'tools', 'instr', 'copyInstr', 'copyToken', 'reveal', 'tokenMasked', 'log',
   ];
   const missingIds = REQUIRED_UI_IDS.filter((id) => !ui.text.includes('id="' + id + '"'));
