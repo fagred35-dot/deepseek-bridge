@@ -37,6 +37,10 @@ INSTRUCTION.preview.md
 *-test.txt
 bridge/t.txt
 
+# Артефакты боевых проверок на живых сайтах (создаются агентом при тесте связки).
+# arena-agent-status.txt — из прогона на arena.ai 28.09.2026.
+arena-agent-status.txt
+
 # --- Разное ---
 node_modules/
 *.log
