@@ -1787,10 +1787,49 @@
 
   // ---------- сканирование ----------
 
+  // Если блоков не нашли, но страница не пуста — пишем в лог, что вообще
+  // нашлось. Так можно отладить новый чат по одной строке в панели, не
+  // пересобирая расширение. Не чаще раза в 15 с — чтобы не засорять лог.
+  let lastEmptyDiagAt = 0;
+  function diagnoseEmptyScan() {
+    if (Date.now() - lastEmptyDiagAt < 15000) return;
+    lastEmptyDiagAt = Date.now();
+    let shadowHosts = 0;
+    document.querySelectorAll("*").forEach((e) => { if (e.shadowRoot) shadowHosts++; });
+    const probes = [
+      ["pre", document.querySelectorAll("pre").length],
+      ["code", document.querySelectorAll("code").length],
+      ["pre code", document.querySelectorAll("pre code").length],
+      ["[class*=code]", document.querySelectorAll('[class*="code"]').length],
+      ["[class*=Code]", document.querySelectorAll('[class*="Code"]').length],
+      ["[class*=highlight]", document.querySelectorAll('[class*="highlight"]').length],
+      ["[class*=hljs]", document.querySelectorAll('[class*="hljs"]').length],
+      ["[data-language]", document.querySelectorAll("[data-language]").length],
+      ["[class*=markdown]", document.querySelectorAll('[class*="markdown"]').length],
+      ["shadowRoots", shadowHosts],
+    ];
+    addLog("пусто: " + probes.map(([k, v]) => k + "=" + v).join(" "), "error");
+    // Плюс: покажем первые 3 элемента, в тексте которых есть "tool": — это
+    // реальные места, где живёт вызов, даже если селекторы их не поймали.
+    const seen = new Set();
+    let shown = 0;
+    for (const el of document.querySelectorAll("div, span, p, section, article")) {
+      if (shown >= 3) break;
+      const t = (el.textContent || "").trim();
+      if (!/\{\s*"tool"/.test(t)) continue;
+      if (seen.has(el)) continue;
+      seen.add(el);
+      if (Array.from(seen).some((s) => s !== el && s.contains(el))) continue;
+      addLog("носитель #" + (shown + 1) + ": " + chainOf(el) + " :: " + t.replace(/\s+/g, " ").slice(0, 60));
+      shown++;
+    }
+  }
+
   function scan(manual = false) {
     const roots = reasoningRoots();
     const nodes = candidateNodes();
     state.scanned = nodes.length;
+    if (nodes.length === 0) diagnoseEmptyScan();
     let fresh = 0;
 
     nodes.forEach((node) => {
