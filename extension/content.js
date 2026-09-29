@@ -1848,6 +1848,69 @@
       );
     }
     if (!holders.length) addLog("минимальных с {\"tool\":} не нашлось — блока в DOM нет", "error");
+
+    // 3a. Что вообще ВИДНО на странице. innerText учитывает только то, что
+    // реально отрисовано — если тут есть "tool", а querySelectorAll выше ничего
+    // не нашёл, значит контент живёт в закрытом shadow DOM или в чём-то ещё,
+    // куда обычный обход не достаёт.
+    const bodyText = document.body ? document.body.innerText || "" : "";
+    addLog(
+      "innerText: len=" + bodyText.length +
+        " hasTool=" + /\{\s*"tool"/.test(bodyText) +
+        " hasDsb=" + /dsbridge/i.test(bodyText) +
+        " head=" + bodyText.replace(/\s+/g, " ").slice(0, 100),
+      "error",
+    );
+
+    // 3b. elementFromPoint по сетке 5×5 в центре экрана: пробивает shadow DOM
+    // (закрытый тоже) и показывает, что реально лежит в этих точках.
+    const seenTags = new Set();
+    for (let yi = 1; yi <= 5; yi++) {
+      for (let xi = 1; xi <= 5; xi++) {
+        const x = Math.round((window.innerWidth * xi) / 6);
+        const y = Math.round((window.innerHeight * yi) / 6);
+        const el = document.elementFromPoint(x, y);
+        if (!el) continue;
+        const tag = el.tagName.toLowerCase() + "." + (typeof el.className === "string" ? el.className.slice(0, 24) : "—");
+        seenTags.add(tag);
+      }
+    }
+    addLog("elementFromPoint: " + Array.from(seenTags).slice(0, 12).join(" | "), "error");
+
+    // 3c. Открытые shadow roots: querySelectorAll их не обходит, а чаты на
+    // веб-компонентах кладут туда весь контент.
+    let shadowWithTool = 0;
+    let shadowTotal = 0;
+    document.querySelectorAll("*").forEach((e) => {
+      if (!e.shadowRoot) return;
+      shadowTotal++;
+      if (/\{\s*"tool"/.test(e.shadowRoot.textContent || "")) shadowWithTool++;
+    });
+    if (shadowTotal) addLog("открытые shadow roots: " + shadowTotal + " · с tool: " + shadowWithTool, "error");
+
+    // 3d. iframe'ы: если чат рендерит содержимое внутри фрейма, content script
+    // без all_frames: true туда не заглядывает — и панель видит пустую страницу.
+    // На Z.ai iframe'ы появлялись в одном из логов (iframe=2), исчезали в другом.
+    const iframes = document.querySelectorAll("iframe");
+    for (let i = 0; i < Math.min(iframes.length, 4); i++) {
+      const fr = iframes[i];
+      let info = "iframe #" + (i + 1) + ": src=" + (fr.src || "нет");
+      try {
+        const doc = fr.contentDocument;
+        if (doc) {
+          const preN = doc.querySelectorAll("pre").length;
+          const codeN = doc.querySelectorAll("code").length;
+          const bodyText = doc.body ? doc.body.textContent : "";
+          const hasTool = /\{\s*"tool"/.test(bodyText);
+          info += " · pre=" + preN + " code=" + codeN + " hasTool=" + hasTool + " len=" + bodyText.length;
+        } else {
+          info += " · cross-origin (не прочитать)";
+        }
+      } catch (e) {
+        info += " · " + e.message;
+      }
+      addLog(info, "error");
+    }
   }
 
   function scan(manual = false) {
