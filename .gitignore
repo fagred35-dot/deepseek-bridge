@@ -29,6 +29,14 @@ bridge/dist/*.cjs
 #   node extension/render-instruction.mjs
 INSTRUCTION.preview.md
 
+# --- Референсные материалы (чужой код, не наш) ---
+# 0.5.14/ — распакованный плагин ZCode Computer Use: смотрели его идеи,
+# но исходники и node_modules (несколько МБ) в наш репозиторий не нужны.
+0.5.14/
+
+# Тестовые скриншоты ручной проверки GUI-автоматизации.
+shots/gui-test-*.png
+
 # --- Временные файлы ---
 .tmp/
 
