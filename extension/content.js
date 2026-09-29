@@ -1810,20 +1810,44 @@
       ["iframe", document.querySelectorAll("iframe").length],
     ];
     addLog("пусто: " + probes.map(([k, v]) => k + "=" + v).join(" "), "error");
-    // Плюс: покажем первые 3 элемента, в тексте которых есть "tool": — это
-    // реальные места, где живёт вызов, даже если селекторы их не поймали.
-    const seen = new Set();
+
+    // 1. Что лежит в [class*=code]? Именно там обычно и живёт блок кода на
+    // чатах, которые отказались от <pre><code> (Z.ai после редизайна).
+    const codeish = document.querySelectorAll('[class*="code"], [class*="Code"]');
     let shown = 0;
-    for (const el of document.querySelectorAll("div, span, p, section, article")) {
-      if (shown >= 3) break;
-      const t = (el.textContent || "").trim();
-      if (!/\{\s*"tool"/.test(t)) continue;
-      if (seen.has(el)) continue;
-      seen.add(el);
-      if (Array.from(seen).some((s) => s !== el && s.contains(el))) continue;
-      addLog("носитель #" + (shown + 1) + ": " + chainOf(el) + " :: " + t.replace(/\s+/g, " ").slice(0, 60));
+    for (const el of codeish) {
+      if (shown >= 2) break;
+      addLog(
+        "codeish #" + (shown + 1) + ": " + chainOf(el) +
+          " · len=" + (el.textContent || "").length +
+          " · html=" + (el.outerHTML || "").replace(/\s+/g, " ").slice(0, 200),
+      );
       shown++;
     }
+
+    // 2. Минимальные элементы, в тексте которых есть "tool": — то есть те, у
+    // которых НЕТ дочернего с таким же признаком. Именно они и есть блоки.
+    const holders = [];
+    for (const el of document.querySelectorAll("*") ) {
+      if (el.closest("#" + PANEL_ID + ", .dsb-result")) continue;
+      const t = el.textContent || "";
+      if (!/\{\s*"tool"\s*:/.test(t)) continue;
+      let hasInner = false;
+      for (const child of el.children) {
+        if (/\{\s*"tool"\s*:/.test(child.textContent || "")) { hasInner = true; break; }
+      }
+      if (hasInner) continue;
+      holders.push(el);
+      if (holders.length >= 3) break;
+    }
+    for (let i = 0; i < holders.length; i++) {
+      const el = holders[i];
+      addLog(
+        "минимальный #" + (i + 1) + ": " + chainOf(el) +
+          " · html=" + (el.outerHTML || "").replace(/\s+/g, " ").slice(0, 240),
+      );
+    }
+    if (!holders.length) addLog("минимальных с {\"tool\":} не нашлось — блока в DOM нет", "error");
   }
 
   function scan(manual = false) {

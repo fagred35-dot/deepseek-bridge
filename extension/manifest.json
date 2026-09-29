@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Дипсик Мост",
-  "version": "0.14.1",
+  "version": "0.14.2",
   "description": "Связывает веб-чаты (DeepSeek, Qwen, ChatGPT, Claude, Gemini и другие) с локальной файловой системой через локальный мост.",
   "permissions": ["storage"],
   "host_permissions": [
