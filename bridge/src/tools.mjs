@@ -21,6 +21,18 @@ import {
   skillRender,
 } from './presets.mjs';
 import { screenshotPage, findBrowser } from './browser.mjs';
+import {
+  guiState,
+  guiFocus,
+  guiRead,
+  guiSet,
+  guiType,
+  guiKey,
+  guiClick,
+  guiScroll,
+  guiDrag,
+  guiClipboard,
+} from './gui.mjs';
 
 const SHELLS = new Set(['powershell', 'pwsh', 'cmd', 'bash', 'sh']);
 const HASHES = new Set(['sha256', 'sha1', 'sha512', 'md5']);
@@ -781,6 +793,122 @@ export const TOOLS = [
       dark: 'boolean, тёмная тема браузера',
       device: 'строка-пресет: mobile | tablet | desktop — подставляет типовой размер и мобильный UA',
     },
+  },
+  {
+    name: 'gui_state',
+    description:
+      'Состояние окна чужой программы: заголовок, pid, handle, положение и размер, ' +
+      'координаты курсора, активно ли окно. Начни с этого перед управлением окном. ' +
+      'Нужен флаг «Управление вводом».',
+    parameters: {
+      handle: 'число, HWND окна из list_windows (самый точный способ)',
+      process: 'строка, часть имени процесса, например "notepad"',
+      match: 'строка, часть заголовка окна',
+    },
+  },
+  {
+    name: 'gui_focus',
+    description:
+      'Поднять окно на передний план. Для foreground-ввода обязательно: без фокуса ' +
+      'SendInput отправляет в активное окно, а не в нужное. Флаг «Управление вводом».',
+    parameters: { handle: 'число', process: 'строка', match: 'строка' },
+  },
+  {
+    name: 'gui_read',
+    description:
+      'Прочитать текст из окна. Работает для классических контролов Edit/RichEdit ' +
+      '(блокнот, старые программы). Для современных (WPF/Electron/Qt) текст так не ' +
+      'читается — вернёт список классов и пустой text. Флаг «Управление вводом».',
+    parameters: { handle: 'число', process: 'строка', match: 'строка' },
+  },
+  {
+    name: 'gui_set',
+    description:
+      'Заменить содержимое текстового поля окна целиком (семантически, через EM_SETSEL + ' +
+      'EM_REPLACESEL). Работает в фоне, фокус не трогает. Только для Edit/RichEdit-контролов. ' +
+      'Флаг «Управление вводом».',
+    parameters: {
+      text: 'строка, новый текст поля',
+      handle: 'число',
+      process: 'строка',
+      match: 'строка',
+    },
+  },
+  {
+    name: 'gui_type',
+    description:
+      'Ввести текст в окно. mode: "background" — PostMessage, курсор и фокус не трогает, ' +
+      'но работает только с Edit/RichEdit-контролами; "foreground" — SendInput, работает ' +
+      'везде, но двигает курсор и забирает фокус. Флаг «Управление вводом».',
+    parameters: {
+      text: 'строка, что ввести (кириллица поддерживается)',
+      mode: 'background | foreground (по умолчанию foreground)',
+      handle: 'число',
+      process: 'строка',
+      match: 'строка',
+    },
+  },
+  {
+    name: 'gui_key',
+    description:
+      'Нажать клавишу или комбинацию: "enter", "esc", "ctrl+s", "alt+f4". ' +
+      'mode: background (PostMessage) или foreground (SendInput). Флаг «Управление вводом».',
+    parameters: {
+      keys: 'строка, например "ctrl+shift+t"',
+      mode: 'background | foreground (по умолчанию foreground)',
+      handle: 'число',
+      process: 'строка',
+      match: 'строка',
+    },
+  },
+  {
+    name: 'gui_click',
+    description:
+      'Клик мышью по координатам экрана (в пикселях). mode: background — PostMessage, ' +
+      'курсор не двигается; foreground — SendInput, двигает реальный курсор. ' +
+      'Координаты бери из gui_state (rect) или со скриншота. Флаг «Управление вводом».',
+    parameters: {
+      x: 'число, X в пикселях экрана',
+      y: 'число, Y в пикселях экрана',
+      button: 'left | right | middle (по умолчанию left)',
+      count: 'число, 1–3 (двойной/тройной клик)',
+      mode: 'background | foreground (по умолчанию foreground)',
+      handle: 'число',
+      process: 'строка',
+      match: 'строка',
+    },
+  },
+  {
+    name: 'gui_scroll',
+    description:
+      'Прокрутить колесом в точке. delta: отрицательное — вниз, положительное — вверх ' +
+      '(шаг 120). Флаг «Управление вводом».',
+    parameters: {
+      delta: 'число, например -120 (вниз) или 120 (вверх)',
+      x: 'число, X точки прокрутки',
+      y: 'число, Y точки прокрутки',
+      mode: 'background | foreground (по умолчанию foreground)',
+      handle: 'число',
+      process: 'строка',
+      match: 'строка',
+    },
+  },
+  {
+    name: 'gui_drag',
+    description:
+      'Перетащить мышью из точки в точку (drag&drop). Только foreground. ' +
+      'Флаг «Управление вводом».',
+    parameters: {
+      fromX: 'число', fromY: 'число', toX: 'число', toY: 'число',
+      handle: 'число', process: 'строка', match: 'строка',
+    },
+  },
+  {
+    name: 'gui_clipboard',
+    description:
+      'Прочитать или записать буфер обмена. set: true — записать (нужен text), иначе читает. ' +
+      'Флаг «Управление вводом».',
+    parameters: { text: 'строка, что положить в буфер (при set: true)', set: 'boolean, записать вместо чтения' },
   },
   {
     name: 'python',
@@ -1625,6 +1753,94 @@ async function runToolInner(cfg, name, args = {}, depth = 0) {
       if (res.exitCode !== 0) throw toolError('ESHOT', (res.stderr || 'скриншот не удался').trim().slice(0, 300));
       const st = await fsp.stat(abs);
       return { path: rel(root, abs), bytes: st.size, mode: args.window ? 'window' : 'screen', window: args.window || null };
+    }
+
+    case 'gui_state': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiState({ handle: args.handle, process: args.process, match: args.match });
+    }
+
+    case 'gui_focus': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiFocus({ handle: args.handle, process: args.process, match: args.match });
+    }
+
+    case 'gui_read': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiRead({ handle: args.handle, process: args.process, match: args.match });
+    }
+
+    case 'gui_set': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiSet({ handle: args.handle, process: args.process, match: args.match, text: args.text });
+    }
+
+    case 'gui_type': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiType({
+        handle: args.handle,
+        process: args.process,
+        match: args.match,
+        text: args.text,
+        mode: args.mode,
+      });
+    }
+
+    case 'gui_key': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiKey({
+        handle: args.handle,
+        process: args.process,
+        match: args.match,
+        keys: args.keys,
+        mode: args.mode,
+      });
+    }
+
+    case 'gui_click': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiClick({
+        handle: args.handle,
+        process: args.process,
+        match: args.match,
+        x: args.x,
+        y: args.y,
+        button: args.button,
+        count: args.count,
+        mode: args.mode,
+      });
+    }
+
+    case 'gui_scroll': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiScroll({
+        handle: args.handle,
+        process: args.process,
+        match: args.match,
+        x: args.x,
+        y: args.y,
+        delta: args.delta,
+        mode: args.mode,
+      });
+    }
+
+    case 'gui_drag': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiDrag({
+        handle: args.handle,
+        process: args.process,
+        match: args.match,
+        fromX: args.fromX,
+        fromY: args.fromY,
+        toX: args.toX,
+        toY: args.toY,
+        mode: args.mode,
+      });
+    }
+
+    case 'gui_clipboard': {
+      if (!cfg.allowInput) throw toolError('EDISABLED', 'Управление вводом выключено в настройках моста');
+      return await guiClipboard({ text: args.text, set: args.set === true });
     }
 
     case 'python': {

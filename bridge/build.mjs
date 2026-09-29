@@ -128,10 +128,13 @@ function buildBundle() {
 }
 
 // В exe нет ни public/, ни scripts/ — отдаём их содержимое строками.
+// Скриптов теперь два: screenshot.ps1 (снимки) и gui.ps1 (управление вводом).
+// Оба распаковываются на диск при первом обращении — PowerShell запускает файл.
 function buildAssetsModule() {
   const html = fs.readFileSync(path.join(__dirname, 'public', 'index.html'), 'utf8');
   const ps1 = fs.readFileSync(path.join(__dirname, 'scripts', 'screenshot.ps1'), 'utf8');
-  return `// Сгенерировано build.mjs — содержимое public/index.html и scripts/screenshot.ps1 вшито в код.
+  const gui = fs.readFileSync(path.join(__dirname, 'scripts', 'gui.ps1'), 'utf8');
+  return `// Сгенерировано build.mjs — содержимое public/index.html и scripts/*.ps1 вшито в код.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -140,20 +143,34 @@ export const STANDALONE = true;
 
 const INDEX_HTML = ${JSON.stringify(html)};
 const SCREENSHOT_PS1 = ${JSON.stringify(ps1)};
+const GUI_PS1 = ${JSON.stringify(gui)};
 
 export function getIndexHtml() {
   return INDEX_HTML;
 }
 
+// Распаковка во временную папку: один раз на процесс, имя фиксированное.
+function unpack(name, content) {
+  const dir = path.join(os.tmpdir(), 'dsbridge-' + process.pid);
+  fs.mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, content, 'utf8');
+  return file;
+}
+
 let unpacked = null;
+let unpackedGui = null;
 
 export function screenshotScriptPath() {
   if (unpacked) return unpacked;
-  const dir = path.join(os.tmpdir(), 'dsbridge-' + process.pid);
-  fs.mkdirSync(dir, { recursive: true });
-  unpacked = path.join(dir, 'screenshot.ps1');
-  fs.writeFileSync(unpacked, SCREENSHOT_PS1, 'utf8');
+  unpacked = unpack('screenshot.ps1', SCREENSHOT_PS1);
   return unpacked;
+}
+
+export function guiScriptPath() {
+  if (unpackedGui) return unpackedGui;
+  unpackedGui = unpack('gui.ps1', GUI_PS1);
+  return unpackedGui;
 }
 `;
 }

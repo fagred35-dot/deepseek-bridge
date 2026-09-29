@@ -133,6 +133,7 @@ const server = http.createServer(async (req, res) => {
         port: cfg.port,
         allowCommands: cfg.allowCommands === true,
         allowNetwork: cfg.allowNetwork === true,
+        allowInput: cfg.allowInput === true,
         extraRoots: cfg.extraRoots || [],
         uptimeSec: Math.round((Date.now() - STARTED_AT) / 1000),
         tools: TOOLS.map((t) => t.name),
@@ -333,6 +334,11 @@ const server = http.createServer(async (req, res) => {
         saveConfig(cfg);
         log('warn', 'Сетевой доступ: ' + (cfg.allowNetwork ? 'ВКЛЮЧЕН' : 'выключен'));
       }
+      if (typeof payload.allowInput === 'boolean') {
+        cfg.allowInput = payload.allowInput;
+        saveConfig(cfg);
+        log('warn', 'Управление вводом: ' + (cfg.allowInput ? 'ВКЛЮЧЕНО' : 'выключено'));
+      }
       if (Array.isArray(payload.extraRoots)) {
         cfg.extraRoots = normalizeRoots(payload.extraRoots);
         saveConfig(cfg);
@@ -349,6 +355,7 @@ const server = http.createServer(async (req, res) => {
         ok: true,
         allowCommands: cfg.allowCommands === true,
         allowNetwork: cfg.allowNetwork === true,
+        allowInput: cfg.allowInput === true,
         extraRoots: cfg.extraRoots || [],
         workspace: cfg.workspaceRoot,
       });

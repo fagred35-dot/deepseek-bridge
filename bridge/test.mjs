@@ -139,7 +139,7 @@ try {
 
   const health = await req('/api/health');
   check('health отвечает ok', health.json && health.json.ok === true);
-  check('health сообщает 50 инструментов', health.json && health.json.tools.length === 50, String(health.json && health.json.tools.length));
+  check('health сообщает 60 инструментов', health.json && health.json.tools.length === 60, String(health.json && health.json.tools.length));
   check('health сообщает флаг allowCommands', health.json && health.json.allowCommands === true);
 
   const noToken = await req('/api/tools');
@@ -147,7 +147,7 @@ try {
   const badToken = await req('/api/tools', { headers: { 'X-Bridge-Token': 'nope' } });
   check('с неверным токеном — 401', badToken.status === 401, String(badToken.status));
   const tools = await req('/api/tools', { headers: AUTH });
-  check('список инструментов по токену', tools.json && tools.json.ok === true && tools.json.tools.length === 50);
+  check('список инструментов по токену', tools.json && tools.json.ok === true && tools.json.tools.length === 60);
   check('health сообщает флаг allowNetwork (по умолчанию выключен)', health.json && health.json.allowNetwork === false);
 
   const ui = await req('/');
@@ -1115,7 +1115,7 @@ try {
   );
 
   const mcpList = await mcp('tools/list', {});
-  check('MCP tools/list отдаёт 50 инструментов', mcpList.json && mcpList.json.result.tools.length === 50, String(mcpList.json && mcpList.json.result.tools.length));
+  check('MCP tools/list отдаёт 60 инструментов', mcpList.json && mcpList.json.result.tools.length === 60, String(mcpList.json && mcpList.json.result.tools.length));
   const mcpNames = mcpList.json.result.tools.map((t) => t.name);
   check('MCP tools/list включает read_file', mcpNames.includes('read_file'));
   const mcpListDir = mcpList.json.result.tools.find((t) => t.name === 'list_dir');

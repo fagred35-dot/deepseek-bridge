@@ -19,3 +19,9 @@ export function getIndexHtml() {
 export function screenshotScriptPath() {
   return path.join(HERE, '..', 'scripts', 'screenshot.ps1');
 }
+
+// gui.ps1 — управление вводом (клики, текст, клавиши). Тот же принцип: путь на
+// диске, потому что PowerShell запускает именно файл.
+export function guiScriptPath() {
+  return path.join(HERE, '..', 'scripts', 'gui.ps1');
+}
