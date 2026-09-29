@@ -1807,6 +1807,7 @@
       ["[data-language]", document.querySelectorAll("[data-language]").length],
       ["[class*=markdown]", document.querySelectorAll('[class*="markdown"]').length],
       ["shadowRoots", shadowHosts],
+      ["iframe", document.querySelectorAll("iframe").length],
     ];
     addLog("пусто: " + probes.map(([k, v]) => k + "=" + v).join(" "), "error");
     // Плюс: покажем первые 3 элемента, в тексте которых есть "tool": — это
